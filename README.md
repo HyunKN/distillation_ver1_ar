@@ -113,6 +113,7 @@ dataset/coco/
     └── captions_val2017.json
 ```
 데이터셋: https://cocodataset.org/#download
+
 **사용된 데이터셋 규격:**
 - **2017 Train images** [118K/18GB]
 - **2017 Val images** [5K/1GB]
