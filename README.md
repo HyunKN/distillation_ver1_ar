@@ -409,8 +409,9 @@ exported_onnx/텍스트인코더.onnx
 python compile_and_profile.py --img_name "이미지파일명" --txt_name "텍스트파일명"
 ```
 테스트 중에는 onnx 파일명은 
-260114_lpcvc_fastvitS12_e3_best_image 처럼 세부 config 사항을 명시하는 것을 추천합니다.
-시간/프로젝트명/모델명/에폭/상태/인코더종류
+lpcvc_fastvitS12_e3_best_image 처럼 세부 config 사항을 명시하는 것을 추천합니다.
+프로젝트명/모델명/에폭/상태/인코더종류
+(업로드 후 모델명 수정 추천)
 
 **옵션:**
 | 옵션 | 기본값 | 설명 |
