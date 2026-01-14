@@ -25,6 +25,13 @@
 ```
 LPCV_Track1_ImgToText/
 │
+│    # 데이터셋은 따로 다운로드가 필요합니다. (용량이 너무 큼)
+├── dataset/coco/
+│   ├── train2017/                     # *.jpg
+│   ├── val2017/                       # *.jpg
+│   └── annotations/
+│       ├── captions_train2017.json
+│       └── captions_val2017.json
 ├── config.yaml                  # 전체 설정(모델/데이터/학습/증류/추출)
 ├── scripts/
 │   ├── train.py                 # 학습 실행 엔트리포인트
@@ -105,7 +112,11 @@ dataset/coco/
     ├── captions_train2017.json
     └── captions_val2017.json
 ```
-
+데이터셋: https://cocodataset.org/#download
+**사용된 데이터셋 규격:**
+- **2017 Train images** [118K/18GB]
+- **2017 Val images** [5K/1GB]
+- **2017 Train/Val annotations** [241MB]
 ---
 
 ## 5) 설치 (Windows CMD 기준)
