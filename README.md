@@ -3,7 +3,10 @@
 > Snapdragon(NPU/HTP) 환경에서 동작할 **초경량 Image↔Text Retrieval(검색)** 모델을 학습하고,  
 > ONNX로 export하여 Qualcomm AI Hub에서 성능(지연/속도)을 확인하는 프로젝트입니다.
 
-* 해당 레포는 초기 프로젝트 시 내용 공유를 위해 임시로 작성해본 프로젝트입니다.
+### 🆕 최근 업데이트 (v2.0)
+- ✅ **COCO-style 평가**: image_id 기반 매칭으로 정확한 Recall 측정
+- ✅ **OOM 해결**: Chunked 유사도 계산으로 25,000+ 캡션 처리 가능
+- ✅ **Dynamic Random Sampling**: 에폭마다 다른 캡션 선택 (데이터 증강 효과)
 
 ---
 
@@ -75,9 +78,11 @@ LPCV_Track1_ImgToText/
 - **Train augmentation**: RandomResizedCrop / HorizontalFlip / ColorJitter
 - COCO는 이미지당 캡션이 여러 개라 `max_captions_per_image`로 학습 다양화
 
-### 평가
+### 평가 (v2.0 업데이트)
+- **COCO-style 평가**: image_id 기반 매칭 (한 이미지의 모든 캡션을 정답으로 인정)
 - **Recall@1/5/10**
 - **양방향 평가**: I2T(Image→Text), T2I(Text→Image), Mean(평균)
+- **OOM 방지**: Chunked 유사도 계산 (대용량 데이터셋 처리 가능)
 
 ### 제출/배포 (LPCVC 대회 샘플 규격 준수)
 - **분리 ONNX export** (opset 18, 대회 샘플 호환)
@@ -218,56 +223,71 @@ Recall@K = (성공한 쿼리 수 / 전체 쿼리 수) × 100%
 
 ---
 
-## 7-1) eval.py 평가 방식 (채점 로직)
+## 7-1) eval.py 평가 방식 (COCO-style 채점 로직)
 
 ### 평가 흐름
 
 ```
-1. 체크포인트 로드 → 2. 전체 val 데이터 임베딩 추출 → 3. 유사도 계산 → 4. Recall@K 산출
+1. 체크포인트 로드 → 2. 전체 val 데이터 임베딩 추출 → 3. 이미지 중복 제거 → 4. 유사도 계산 → 5. Recall@K 산출
 ```
 
-### Step 1: 모든 이미지/텍스트 임베딩 추출
+### ⚡ COCO-style 평가 (v2.0 업데이트)
+
+기존 인덱스 기반 평가의 문제점을 해결한 새로운 평가 방식:
+
+| 평가 방식 | 설명 | 문제점 |
+|-----------|------|--------|
+| **인덱스 기반** (기존) | i번째 이미지 = i번째 캡션이 정답 | 같은 이미지에 여러 캡션 → 과소평가 |
+| **image_id 기반** (현재) | image_id로 매칭, 모든 관련 캡션이 정답 | ✅ 정확한 평가 |
+
+### Step 1: 임베딩 추출 + image_id 수집
 ```python
-for imgs, toks, _ in loader:
-    img_emb, txt_emb = model(imgs, toks)  # [B, 256]
+for imgs, toks, metas in loader:
+    img_emb, txt_emb = model(imgs, toks)
     all_img.append(img_emb)
     all_txt.append(txt_emb)
-
-image_emb = torch.cat(all_img, dim=0)  # [N, 256] 전체 이미지
-text_emb = torch.cat(all_txt, dim=0)   # [N, 256] 전체 텍스트
+    
+    # meta에서 image_id 추출
+    for meta in metas:
+        all_image_ids.append(meta["image_id"])
 ```
 
-### Step 2: 유사도 행렬(Similarity Matrix) 계산
+### Step 2: 이미지 중복 제거 (Deduplication)
 ```python
-# I2T: 각 이미지가 모든 텍스트와 얼마나 유사한지
-sim_i2t = image_emb @ text_emb.t()  # [N, N] 코사인 유사도
-
-# T2I: 각 텍스트가 모든 이미지와 얼마나 유사한지
-sim_t2i = text_emb @ image_emb.t()  # [N, N]
+# 같은 image_id를 가진 이미지는 한 번만 사용
+seen_image_ids = {}
+for idx, img_id in enumerate(all_image_ids):
+    if img_id not in seen_image_ids:
+        unique_image_embs.append(image_emb[idx])
+        unique_image_ids.append(img_id)
 ```
 
-### Step 3: 순위(Rank) 계산
+### Step 3: Chunked 유사도 계산 (OOM 방지)
 ```python
-ranks = torch.argsort(sim, dim=1, descending=True)  # 유사도 높은 순 정렬
-# 정답은 대각선 위치 (i번째 이미지의 정답은 i번째 텍스트)
+# 청크 단위로 나눠서 계산 → 메모리 효율적
+for start in range(0, N_img, chunk_size):
+    chunk_img_emb = unique_image_emb[start:end]
+    sim = chunk_img_emb @ text_emb.t()  # [chunk, N_txt]
 ```
 
-### Step 4: Recall@K 계산
+### Step 4: image_id 기반 Recall@K 계산
 ```python
-# 정답이 상위 K개 안에 있으면 성공
-for k in [1, 5, 10]:
-    recall_at_k = (정답_순위 < k).float().mean()
+# I2T: 이미지 → 해당 image_id의 모든 캡션 중 하나라도 top-K에 있으면 성공
+# T2I: 캡션 → 해당 캡션의 image_id를 가진 이미지가 top-K에 있으면 성공
 ```
 
 ### 출력 예시
 ```
-I2T: R@1=25.30% R@5=48.20% R@10=60.50%
-T2I: R@1=22.10% R@5=45.80% R@10=58.30%
-Mean: R@1=23.70% R@5=47.00% R@10=59.40%
+[COCO Eval] 5000 unique images, 25014 captions
+I2T: R@1=7.70% R@5=23.98% R@10=34.94%
+T2I: R@1=6.77% R@5=21.27% R@10=32.78%
+Mean: R@1=7.24% R@5=22.63% R@10=33.86%
 ```
 
-### 핵심 가정
-> **i번째 이미지와 i번째 텍스트가 정답 쌍**이라고 가정 (COCO Captions 구조)
+### 핵심 개선 사항
+> ✅ **image_id 기반 매칭**: 한 이미지의 5개 캡션 모두 정답으로 인정  
+> ✅ **이미지 중복 제거**: 같은 이미지는 임베딩 한 번만 계산  
+> ✅ **Chunked 계산**: OOM 방지 (25,000개 캡션도 처리 가능)
 
 ---
 
