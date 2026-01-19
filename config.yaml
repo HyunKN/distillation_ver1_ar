@@ -3,7 +3,7 @@ device: cuda   # cpu|cuda|auto
 
 data:
   mode: coco            # coco|jsonl
-  coco_root: dataset/coco
+  coco_root: C:/Users/Ltp/Downloads/lpcvc_clip_lite_project_v2_5_merge/dataset/coco
   train_split: train2017
   val_split: val2017
   train_captions_json: annotations/captions_train2017.json
@@ -40,7 +40,7 @@ model:
   logit_scale_max: 4.6    # log(100)
 
 train:
-  epochs: 3
+  epochs: 1
   lr: 2.0e-4
   weight_decay: 0.02
   warmup_epochs: 1.0      # [NEW] Linear warmup for this many epochs

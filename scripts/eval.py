@@ -1,10 +1,11 @@
 import argparse
 import torch
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from lpcvc_retrieval.config import load_config, resolve_device
 from lpcvc_retrieval.data import build_tokenizer, make_datasets, collate_fn
 from lpcvc_retrieval.model import ClipLite
-from lpcvc_retrieval.metrics import bidirectional_recall, format_metrics, recall_at_1_5_10
+from lpcvc_retrieval.metrics import bidirectional_recall, format_metrics, recall_at_1_5_10, coco_bidirectional_recall
 
 @torch.no_grad()
 def main():
@@ -49,22 +50,60 @@ def main():
                         collate_fn=collate_fn, drop_last=False)
 
     all_img, all_txt = [], []
-    for imgs, toks, _ in loader:
+    all_image_ids = []
+    
+    for imgs, toks, metas in tqdm(loader, desc="Evaluating"):
         imgs = imgs.to(device, non_blocking=True)
         toks = toks.to(device, non_blocking=True)
         img_emb, txt_emb = model(imgs, toks)
         all_img.append(img_emb.cpu())
         all_txt.append(txt_emb.cpu())
+        
+        # Collect image_ids from meta
+        for meta in metas:
+            if isinstance(meta, dict) and meta.get("image_id") is not None:
+                all_image_ids.append(meta["image_id"])
+            else:
+                all_image_ids.append(None)
 
     image_emb = torch.cat(all_img, dim=0)
     text_emb = torch.cat(all_txt, dim=0)
-    metrics = bidirectional_recall(image_emb, text_emb)
+    
+    # Check if we have valid image_ids for COCO-style evaluation
+    has_image_ids = all(img_id is not None for img_id in all_image_ids)
+    
+    if has_image_ids:
+        # COCO-style evaluation with image deduplication
+        seen_image_ids = {}
+        unique_image_embs = []
+        unique_image_ids = []
+        
+        for idx, img_id in enumerate(all_image_ids):
+            if img_id not in seen_image_ids:
+                seen_image_ids[img_id] = len(unique_image_ids)
+                unique_image_embs.append(image_emb[idx])
+                unique_image_ids.append(img_id)
+        
+        unique_image_emb = torch.stack(unique_image_embs, dim=0)
+        text_image_ids = all_image_ids
+        
+        print(f"[COCO Eval] {len(unique_image_ids)} unique images, {len(text_image_ids)} captions")
+        
+        metrics = coco_bidirectional_recall(
+            unique_image_emb, text_emb, unique_image_ids, text_image_ids
+        )
+    else:
+        # Fallback to index-based evaluation
+        print("[Index-based Eval] No image_ids found, using legacy evaluation")
+        metrics = bidirectional_recall(image_emb, text_emb)
+    
     print(format_metrics(metrics))
 
-    # Optional: keep I2T-only lines for quick comparison
-    r1, r5, r10 = recall_at_1_5_10(image_emb, text_emb)
-    print(f"Recall@1 : {r1*100:.2f}%")
-    print(f"Recall@5 : {r5*100:.2f}%")
-    print(f"Recall@10: {r10*100:.2f}%")
+    # I2T-only lines for quick comparison
+    i2t = metrics['I2T']
+    print(f"Recall@1 : {i2t['R@1']*100:.2f}%")
+    print(f"Recall@5 : {i2t['R@5']*100:.2f}%")
+    print(f"Recall@10: {i2t['R@10']*100:.2f}%")
+
 if __name__ == "__main__":
     main()
