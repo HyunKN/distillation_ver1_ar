@@ -133,33 +133,62 @@ class CocoCaptionsRetrievalDataset(Dataset):
             coco = json.load(f)
 
         id2file = {img["id"]: img["file_name"] for img in coco.get("images", [])}
-        caps = defaultdict(list)
-        for ann in coco.get("annotations", []):
-            caps[ann["image_id"]].append(ann.get("caption", ""))
 
-        self.samples: List[Tuple[str, List[str]]] = []
-        for image_id, file_name in id2file.items():
-            c = caps.get(image_id, [])
-            c = [x for x in c if isinstance(x, str) and x.strip()]
-            if not c:
-                continue
-            img_rel = f"{self.split}/{file_name}"
-            self.samples.append((img_rel, c))
+        self.samples = []
+
+        if self.is_train:
+            # Train: image 단위로 samples 생성 (캡션들을 리스트로 묶음)
+            caps = defaultdict(list)
+            for ann in coco.get("annotations", []):
+                caps[ann["image_id"]].append(ann.get("caption", ""))
+
+            for image_id, file_name in id2file.items():
+                c = caps.get(image_id, [])
+                c = [x for x in c if isinstance(x, str) and x.strip()]
+                if not c:
+                    continue
+                img_rel = f"{self.split}/{file_name}"
+                self.samples.append((img_rel, c))
+        else:
+            # Eval: 캡션 단위로 samples 생성 (image_id 포함)
+            for ann in coco.get("annotations", []):
+                image_id = ann.get("image_id", None)
+                caption = ann.get("caption", "")
+                ann_id = ann.get("id", None)
+
+                if image_id is None:
+                    continue
+                if not (isinstance(caption, str) and caption.strip()):
+                    continue
+
+                file_name = id2file.get(image_id, None)
+                if file_name is None:
+                    continue
+
+                img_rel = f"{self.split}/{file_name}"
+                self.samples.append((img_rel, int(image_id), caption, int(ann_id) if ann_id is not None else None))
 
     def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, idx: int):
-        img_rel, caps = self.samples[idx]
-        
-        # Random caption selection during training for variety
-        if self.is_train and len(caps) > 1:
-            import random
-            pool = caps if self.max_caps_per_image >= len(caps) else random.sample(caps, k=self.max_caps_per_image)
-            cap = random.choice(pool)
+        item = self.samples[idx]
+
+        if self.is_train:
+            img_rel, caps = item
+
+            if self.is_train and len(caps) > 1:
+                import random
+                pool = caps if self.max_caps_per_image >= len(caps) else random.sample(caps, k=self.max_caps_per_image)
+                cap = random.choice(pool)
+            else:
+                cap = caps[0]
+
+            image_id = None
+            ann_id = None
         else:
-            cap = caps[0]
-            
+            img_rel, image_id, cap, ann_id = item
+
         img_path = os.path.join(self.coco_root, img_rel)
         image = Image.open(img_path).convert("RGB")
         x = self.tf(image).to(torch.float32)
@@ -172,7 +201,14 @@ class CocoCaptionsRetrievalDataset(Dataset):
             return_tensors="pt",
         )
         input_ids = tok["input_ids"][0].to(torch.int32)
-        return x, input_ids, cap
+
+        meta = {
+            "image_id": image_id,   # train이면 None일 수 있음
+            "ann_id": ann_id,
+            "caption": cap,
+            "img_rel": img_rel,
+        }
+        return x, input_ids, meta
 
 def make_datasets(cfg, tokenizer: CLIPTokenizer):
     mode = str(cfg.data.get("mode", "jsonl")).lower()
@@ -223,5 +259,5 @@ def make_datasets(cfg, tokenizer: CLIPTokenizer):
 def collate_fn(batch):
     imgs = torch.stack([b[0] for b in batch], dim=0).float()
     toks = torch.stack([b[1] for b in batch], dim=0)
-    caps = [b[2] for b in batch]
-    return imgs, toks, caps
+    metas = [b[2] for b in batch]   
+    return imgs, toks, metas

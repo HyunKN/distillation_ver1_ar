@@ -1,6 +1,7 @@
 from __future__ import annotations
 import torch
-from typing import Tuple
+from typing import Tuple, List, Dict, Optional
+from collections import defaultdict
 
 @torch.no_grad()
 def recall_at_k(sim: torch.Tensor, ks: list = [1, 5, 10]) -> dict:
@@ -84,3 +85,180 @@ def format_metrics(metrics: dict) -> str:
         f"Mean: R@1={mean['R@1']*100:.2f}% R@5={mean['R@5']*100:.2f}% R@10={mean['R@10']*100:.2f}%"
     ]
     return " | ".join(lines)
+
+
+# ============================================================================
+# COCO-style evaluation with image_id-based matching
+# ============================================================================
+
+@torch.no_grad()
+def coco_i2t_recall(
+    unique_image_emb: torch.Tensor,
+    text_emb: torch.Tensor,
+    unique_image_ids: List[int],
+    text_image_ids: List[int],
+    ks: List[int] = [1, 5, 10],
+    chunk_size: int = 256,
+) -> Dict[str, float]:
+    """
+    COCO-style Image-to-Text Recall.
+    
+    For each unique image, find if ANY of its matching captions are in top-K.
+    
+    Args:
+        unique_image_emb: [N_img, D] unique image embeddings (deduplicated)
+        text_emb: [N_txt, D] all text embeddings
+        unique_image_ids: [N_img] image_id for each unique image
+        text_image_ids: [N_txt] image_id for each text (caption)
+        ks: list of K values
+        chunk_size: chunk size for similarity computation (OOM prevention)
+    
+    Returns:
+        Dictionary with recall values for each K
+    """
+    device = unique_image_emb.device
+    N_img = unique_image_emb.size(0)
+    N_txt = text_emb.size(0)
+    
+    # Build mapping: image_id -> list of text indices
+    imgid_to_txt_indices = defaultdict(list)
+    for txt_idx, img_id in enumerate(text_image_ids):
+        imgid_to_txt_indices[img_id].append(txt_idx)
+    
+    # For each unique image, find the best rank among all its matching captions
+    best_ranks = []
+    
+    for start in range(0, N_img, chunk_size):
+        end = min(start + chunk_size, N_img)
+        chunk_img_emb = unique_image_emb[start:end]  # [chunk, D]
+        
+        # Compute similarity: [chunk, N_txt]
+        sim = chunk_img_emb @ text_emb.t()
+        
+        # Sort by similarity (descending)
+        sorted_indices = torch.argsort(sim, dim=1, descending=True)  # [chunk, N_txt]
+        
+        for i, global_idx in enumerate(range(start, end)):
+            img_id = unique_image_ids[global_idx]
+            target_txt_indices = set(imgid_to_txt_indices[img_id])
+            
+            # Find best (minimum) rank among all matching captions
+            best_rank = N_txt  # worst case
+            for rank, txt_idx in enumerate(sorted_indices[i].tolist()):
+                if txt_idx in target_txt_indices:
+                    best_rank = rank
+                    break
+            best_ranks.append(best_rank)
+    
+    best_ranks = torch.tensor(best_ranks, device=device, dtype=torch.long)
+    
+    results = {}
+    for k in ks:
+        results[f'R@{k}'] = (best_ranks < k).float().mean().item()
+    return results
+
+
+@torch.no_grad()
+def coco_t2i_recall(
+    unique_image_emb: torch.Tensor,
+    text_emb: torch.Tensor,
+    unique_image_ids: List[int],
+    text_image_ids: List[int],
+    ks: List[int] = [1, 5, 10],
+    chunk_size: int = 256,
+) -> Dict[str, float]:
+    """
+    COCO-style Text-to-Image Recall.
+    
+    For each caption, find if its corresponding image is in top-K.
+    
+    Args:
+        unique_image_emb: [N_img, D] unique image embeddings (deduplicated)
+        text_emb: [N_txt, D] all text embeddings
+        unique_image_ids: [N_img] image_id for each unique image
+        text_image_ids: [N_txt] image_id for each text (caption)
+        ks: list of K values
+        chunk_size: chunk size for similarity computation (OOM prevention)
+    
+    Returns:
+        Dictionary with recall values for each K
+    """
+    device = text_emb.device
+    N_img = unique_image_emb.size(0)
+    N_txt = text_emb.size(0)
+    
+    # Build mapping: image_id -> unique image index
+    imgid_to_img_idx = {img_id: idx for idx, img_id in enumerate(unique_image_ids)}
+    
+    ranks = []
+    
+    for start in range(0, N_txt, chunk_size):
+        end = min(start + chunk_size, N_txt)
+        chunk_txt_emb = text_emb[start:end]  # [chunk, D]
+        
+        # Compute similarity: [chunk, N_img]
+        sim = chunk_txt_emb @ unique_image_emb.t()
+        
+        # Sort by similarity (descending)
+        sorted_indices = torch.argsort(sim, dim=1, descending=True)  # [chunk, N_img]
+        
+        for i, global_idx in enumerate(range(start, end)):
+            target_img_id = text_image_ids[global_idx]
+            target_img_idx = imgid_to_img_idx[target_img_id]
+            
+            # Find rank of target image
+            rank_pos = (sorted_indices[i] == target_img_idx).nonzero(as_tuple=False)
+            if len(rank_pos) > 0:
+                ranks.append(rank_pos[0, 0].item())
+            else:
+                ranks.append(N_img)
+    
+    ranks = torch.tensor(ranks, device=device, dtype=torch.long)
+    
+    results = {}
+    for k in ks:
+        results[f'R@{k}'] = (ranks < k).float().mean().item()
+    return results
+
+
+@torch.no_grad()
+def coco_bidirectional_recall(
+    unique_image_emb: torch.Tensor,
+    text_emb: torch.Tensor,
+    unique_image_ids: List[int],
+    text_image_ids: List[int],
+    ks: List[int] = [1, 5, 10],
+    chunk_size: int = 256,
+) -> Dict:
+    """
+    COCO-style bidirectional recall with proper image_id matching.
+    
+    Args:
+        unique_image_emb: [N_img, D] deduplicated image embeddings
+        text_emb: [N_txt, D] all text embeddings (one per caption)
+        unique_image_ids: [N_img] image_id for each unique image
+        text_image_ids: [N_txt] image_id for each caption
+        ks: list of K values
+        chunk_size: chunk size for OOM prevention
+    
+    Returns:
+        Dictionary with I2T, T2I, and mean metrics
+    """
+    i2t = coco_i2t_recall(
+        unique_image_emb, text_emb, unique_image_ids, text_image_ids, ks, chunk_size
+    )
+    t2i = coco_t2i_recall(
+        unique_image_emb, text_emb, unique_image_ids, text_image_ids, ks, chunk_size
+    )
+    
+    results = {
+        'I2T': i2t,
+        'T2I': t2i,
+        'mean': {}
+    }
+    
+    for k in ks:
+        key = f'R@{k}'
+        results['mean'][key] = (i2t[key] + t2i[key]) / 2
+    
+    return results
