@@ -11,7 +11,7 @@ from .data import build_tokenizer, make_datasets, collate_fn
 from .distill import DistillConfig, ClipTeacher, compute_affinity_distill_loss
 from .model import ClipLite
 from .losses import clip_contrastive_loss, pairwise_ranking_loss
-from .metrics import recall_at_1_5_10, bidirectional_recall, format_metrics
+from .metrics import recall_at_1_5_10, bidirectional_recall, format_metrics, coco_bidirectional_recall
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -45,7 +45,7 @@ def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps: int, num_traini
     return LambdaLR(optimizer, lr_lambda)
 
 @torch.no_grad()
-def evaluate(model: ClipLite, loader: DataLoader, device: str, use_bidirectional: bool = True):
+def evaluate(model: ClipLite, loader: DataLoader, device: str, use_bidirectional: bool = True, use_coco_eval: bool = True):
     """
     Evaluate model on retrieval metrics.
     
@@ -54,23 +54,60 @@ def evaluate(model: ClipLite, loader: DataLoader, device: str, use_bidirectional
         loader: Validation data loader
         device: Device to run on
         use_bidirectional: If True, compute both I2T and T2I metrics
+        use_coco_eval: If True, use COCO-style image_id-based evaluation (handles one-to-many)
     """
     model.eval()
     all_img, all_txt = [], []
-    for imgs, toks, _ in tqdm(loader, desc="eval", leave=False):
+    all_image_ids = []
+    
+    for imgs, toks, metas in tqdm(loader, desc="eval", leave=False):
         imgs = imgs.to(device, non_blocking=True)
         toks = toks.to(device, non_blocking=True)
         img_emb, txt_emb = model(imgs, toks)
         all_img.append(img_emb.cpu())
         all_txt.append(txt_emb.cpu())
+        
+        # Collect image_ids from meta
+        for meta in metas:
+            if isinstance(meta, dict) and meta.get("image_id") is not None:
+                all_image_ids.append(meta["image_id"])
+            else:
+                all_image_ids.append(None)
+    
     image_emb = torch.cat(all_img, dim=0)
     text_emb = torch.cat(all_txt, dim=0)
     
-    if use_bidirectional:
-        return bidirectional_recall(image_emb, text_emb)
+    # Check if we have valid image_ids for COCO-style evaluation
+    has_image_ids = all(img_id is not None for img_id in all_image_ids)
+    
+    if use_coco_eval and has_image_ids and use_bidirectional:
+        # COCO-style evaluation with image deduplication
+        # Deduplicate images by image_id (same image appears multiple times for different captions)
+        seen_image_ids = {}
+        unique_image_embs = []
+        unique_image_ids = []
+        
+        for idx, img_id in enumerate(all_image_ids):
+            if img_id not in seen_image_ids:
+                seen_image_ids[img_id] = len(unique_image_ids)
+                unique_image_embs.append(image_emb[idx])
+                unique_image_ids.append(img_id)
+        
+        unique_image_emb = torch.stack(unique_image_embs, dim=0)
+        text_image_ids = all_image_ids  # Each text's corresponding image_id
+        
+        print(f"[COCO Eval] {len(unique_image_ids)} unique images, {len(text_image_ids)} captions")
+        
+        return coco_bidirectional_recall(
+            unique_image_emb, text_emb, unique_image_ids, text_image_ids
+        )
     else:
-        r1, r5, r10 = recall_at_1_5_10(image_emb, text_emb)
-        return {'I2T': {'R@1': r1, 'R@5': r5, 'R@10': r10}}
+        # Fallback to index-based evaluation
+        if use_bidirectional:
+            return bidirectional_recall(image_emb, text_emb)
+        else:
+            r1, r5, r10 = recall_at_1_5_10(image_emb, text_emb)
+            return {'I2T': {'R@1': r1, 'R@5': r5, 'R@10': r10}}
 
 def _normalize_clip(img: torch.Tensor, mean: list, std: list) -> torch.Tensor:
     """Normalize image tensor to CLIP space (for teacher model)."""
