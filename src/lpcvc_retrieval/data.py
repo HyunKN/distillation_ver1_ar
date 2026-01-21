@@ -78,16 +78,26 @@ class JsonlRetrievalDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx: int):
-        img_rel, caps = self.samples[idx]
-        
-        # Random caption selection during training for variety
-        if self.is_train and len(caps) > 1:
-            import random
-            pool = caps if self.max_caps_per_image >= len(caps) else random.sample(caps, k=self.max_caps_per_image)
-            cap = random.choice(pool)
-        else:
-            cap = caps[0]
+        item = self.samples[idx]
 
+        if self.is_train:
+            img_rel, caps = item
+            # [수정] 파일명에서 숫자 image_id 추출 (예: 000000123456.jpg -> 123456)
+            try:
+                image_id = int(os.path.basename(img_rel).split('.')[0])
+            except:
+                image_id = idx 
+
+            if len(caps) > 1:
+                import random
+                pool = caps if self.max_caps_per_image >= len(caps) else random.sample(caps, k=self.max_caps_per_image)
+                cap = random.choice(pool)
+            else:
+                cap = caps[0]
+            ann_id = None
+        else:
+            img_rel, image_id, cap, ann_id = item
+            
         img_path = os.path.join(self.image_root, img_rel)
         image = Image.open(img_path).convert("RGB")
         x = self.tf(image).to(torch.float32)
@@ -99,8 +109,18 @@ class JsonlRetrievalDataset(Dataset):
             max_length=77,
             return_tensors="pt",
         )
-        input_ids = tok["input_ids"][0].to(torch.int32)  # [77], competition expects int32
-        return x, input_ids, cap
+        input_ids = tok["input_ids"][0].to(torch.int32)
+
+        # [수정] 학습/평가 모두에서 meta 딕셔너리를 생성하여 반환합니다.
+        meta = {
+            "image_id": image_id,
+            "ann_id": ann_id,
+            "caption": cap,
+            "img_rel": img_rel,
+        }
+        # 기존: return x, input_ids, cap
+        # 변경: 아래와 같이 return하여 loss 계산 시 image_id를 쓸 수 있게 합니다.
+        return x, input_ids, meta
 
 class CocoCaptionsRetrievalDataset(Dataset):
     """
@@ -148,7 +168,8 @@ class CocoCaptionsRetrievalDataset(Dataset):
                 if not c:
                     continue
                 img_rel = f"{self.split}/{file_name}"
-                self.samples.append((img_rel, c))
+                # [수정] image_id를 튜플에 포함
+                self.samples.append((img_rel, int(image_id), c))
         else:
             # Eval: 캡션 단위로 samples 생성 (image_id 포함)
             for ann in coco.get("annotations", []):
@@ -175,7 +196,7 @@ class CocoCaptionsRetrievalDataset(Dataset):
         item = self.samples[idx]
 
         if self.is_train:
-            img_rel, caps = item
+            img_rel, image_id, caps = item
 
             if self.is_train and len(caps) > 1:
                 import random
@@ -184,7 +205,6 @@ class CocoCaptionsRetrievalDataset(Dataset):
             else:
                 cap = caps[0]
 
-            image_id = None
             ann_id = None
         else:
             img_rel, image_id, cap, ann_id = item

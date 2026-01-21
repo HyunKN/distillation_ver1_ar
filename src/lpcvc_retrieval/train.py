@@ -10,7 +10,8 @@ from .config import resolve_device
 from .data import build_tokenizer, make_datasets, collate_fn
 from .distill import DistillConfig, ClipTeacher, compute_affinity_distill_loss
 from .model import ClipLite
-from .losses import clip_contrastive_loss, pairwise_ranking_loss
+# siglip_loss와 multi_gt_masked_contrastive_loss를 추가
+from .losses import clip_contrastive_loss, pairwise_ranking_loss, siglip_loss, multi_gt_masked_contrastive_loss
 from .metrics import recall_at_1_5_10, bidirectional_recall, format_metrics, coco_bidirectional_recall
 
 def set_seed(seed: int):
@@ -242,9 +243,12 @@ def train(cfg) -> str:
         model.train()
         pbar = tqdm(train_loader, desc=f"epoch {epoch+1}/{epochs}")
 
-        for step, (imgs, toks, _) in enumerate(pbar, start=1):
+        for step, (imgs, toks, metas) in enumerate(pbar, start=1):
             imgs = imgs.to(device, non_blocking=True)
             toks = toks.to(device, non_blocking=True)
+
+            # meta 정보 버리지 않고 image_id 리스트 추출 후 텐서로 변환해서 gpu로 보내기
+            image_ids = torch.tensor([m['image_id'] for m in metas], device=device, dtype=torch.long)
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -253,12 +257,14 @@ def train(cfg) -> str:
             with torch.amp.autocast(device_type=autocast_device, enabled=use_amp):
                 img_emb, txt_emb = model(imgs, toks)
 
-                # base contrastive
-                loss = w_contrastive * clip_contrastive_loss(
-                    img_emb, txt_emb, model.logit_scale,
-                    label_smoothing=label_smoothing
+                # [수정] Multi-GT학습 방법 적용 위해 SigLIP Loss 적용
+                # logit_bias를 함께 전달하며, image_ids를 통해 1:5 매칭을 학습
+                loss = w_contrastive * siglip_loss(
+                    img_emb, txt_emb, 
+                    model.logit_scale, 
+                    model.logit_bias, 
+                    image_ids
                 )
-
                 # ranking (optional)
                 if w_rank > 0:
                     loss = loss + w_rank * pairwise_ranking_loss(

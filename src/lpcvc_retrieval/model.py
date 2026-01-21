@@ -155,6 +155,8 @@ class ClipLite(nn.Module):
                  temperature_init: float,
                  eos_id: int):
         super().__init__()
+        
+        # 1. Vision/Text 타워 설정 (기존 유지)
         self.vision = VisionTower(
             backbone=vision_backbone,
             embed_dim=embed_dim,
@@ -174,9 +176,13 @@ class ClipLite(nn.Module):
             eos_id=eos_id,
         )
         self.text_proj = nn.Linear(text_width, embed_dim, bias=False)
-        # logit_scale parameter (like CLIP)
+
+        # 2. 파라미터 설정 (수정)
         init = float(temperature_init)
         self.logit_scale = nn.Parameter(torch.tensor(1.0 / init).log())
+        
+        # [추가] SigLIP을 위한 학습 가능한 Bias 파라미터
+        self.logit_bias = nn.Parameter(torch.zeros([]))
 
     def encode_image(self, x: torch.Tensor) -> torch.Tensor:
         z = self.vision(x)
