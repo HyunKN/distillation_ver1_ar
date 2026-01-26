@@ -93,6 +93,7 @@ self.model = CLIPModel.from_pretrained(hf_id, use_safetensors=True)
 
 | 항목 | FastViT-S12 | MobileNetV4-Medium |
 |------|-------------|-------------------|
+| **출시 시기** | 2023년 3월 (Apple) | 2024년 4월 (Google) |
 | 파라미터 수 | ~8M | ~9M |
 | ImageNet Top-1 | ~79% | ~80% |
 | **추론 속도 (Hexagon)** | 기준 | **~2배 빠름** |
