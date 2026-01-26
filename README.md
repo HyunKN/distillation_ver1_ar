@@ -29,8 +29,12 @@ How to Train
 환경 설정 확인: config.yaml 파일 내의 데이터 경로와 하이퍼파라미터가 적절한지 확인
 학습 실행: Bash에서 python src/lpcvc_retrieval/train.py --config config.yaml (python3일 수도 있음)
 
- **Main Changes Note (Recent Update)**
- 
- train.py: SigLip 연산 최적화 및 체크포인트 저장 로직 강화
- model.py: 모바일 배포를 고려한 아키텍처 경량화 및 Bias 추가
- data.py: image_id 반환 로직 추가로 정답지(GT) 인식 오류 해결
+ **Main Changes Note (v2-mobilenetv4)**
+
+> 자세한 내용은 [CHANGELOG_mobilenetv4.md](./CHANGELOG_mobilenetv4.md)를 확인하세요.
+
+1. Vision 백본: FastViT-S12 → MobileNetV4-Medium (Hexagon NPU 최적화)
+2. run_train.py 학습 스크립트 추가 (시작/종료 시간, GPU 정보 표시)
+3. safetensors 보안 패치 적용 (pickle 취약점 방지)
+4. ImageNet normalization 적용 (MobileNetV4 pretrained 호환)
+5. scripts/train.py 중복 제거
