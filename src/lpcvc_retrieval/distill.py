@@ -45,7 +45,8 @@ class ClipTeacher(torch.nn.Module):
         from transformers import CLIPModel  # lazy import
 
         hf_id = _teacher_hf_id(model_name, pretrained)
-        self.model = CLIPModel.from_pretrained(hf_id)
+        # use_safetensors=True: pickle 취약점 방지 (보안 강화)
+        self.model = CLIPModel.from_pretrained(hf_id, use_safetensors=True)
         self.model.eval()
         self.model.to(device)
 

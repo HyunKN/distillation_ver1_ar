@@ -1,6 +1,6 @@
 data:
   batch_size: 128
-  coco_root: /content/coco
+  coco_root: dataset/coco
   image_root: dataset/coco
   max_captions_per_image: 5
   mode: coco
@@ -31,26 +31,28 @@ loss:
   w_distill_affinity: 0.8
   w_rank: 0.1
 model:
-  clip_mean:
-  - 0.48145466
-  - 0.4578275
-  - 0.40821073
-  clip_std:
-  - 0.26862954
-  - 0.26130258
-  - 0.27577711
-  dropout: 0.0
-  embed_dim: 256
-  logit_scale_max: 4.6
-  logit_scale_min: -4.6
-  normalize_input: true
-  temperature_init: 0.07
-  text_heads: 4
-  text_layers: 4
-  text_mlp_ratio: 4.0
-  text_width: 256
-  vision_backbone: fastvit_s12.apple_in1k
+  # MobileNetV4-Medium: LPCVC 대회 최적 백본 (FastViT 대비 2배 빠름)
+  vision_backbone: mobilenetv4_conv_medium.e500_r224_in1k
   vision_pretrained: true
+  # ImageNet normalization (MobileNetV4 pretrained weights 호환)
+  clip_mean:
+  - 0.485
+  - 0.456
+  - 0.406
+  clip_std:
+  - 0.229
+  - 0.224
+  - 0.225
+  normalize_input: true
+  embed_dim: 256
+  text_width: 256
+  text_layers: 4
+  text_heads: 4
+  text_mlp_ratio: 4.0
+  dropout: 0.0
+  temperature_init: 0.07
+  logit_scale_min: -4.6
+  logit_scale_max: 4.6
 output:
   out_dir: runs/lpcvc_clip_lite
 seed: 42

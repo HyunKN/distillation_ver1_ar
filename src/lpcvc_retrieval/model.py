@@ -22,19 +22,20 @@ class VisionTower(nn.Module):
         import timm
         self.backbone = timm.create_model(backbone, pretrained=bool(pretrained), num_classes=0, global_pool="avg")
         feat_dim = getattr(self.backbone, "num_features", None)
-        if feat_dim is None:
-            # try infer by running dummy
+        # Force inference of feat_dim for MobileNetV4 compatibility
+        if True:
             with torch.no_grad():
-                x = torch.zeros(1,3,224,224)
+                x = torch.zeros(2, 3, 224, 224)
                 y = self.backbone(x)
-                feat_dim = y.shape[-1]
+                feat_dim = y.flatten(1).shape[1]
         self.proj = nn.Linear(int(feat_dim), int(embed_dim), bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: [B,3,224,224], float32 in [0,1]
         if self.normalize_input:
             x = (x - self.mean) / self.std
-        feat = self.backbone(x)  # [B,C]
+        feat = self.backbone(x)  # [B,C] or [B,C,1,1]
+        feat = feat.flatten(1)   # Force [B,C] for MobileNetV4 compatibility
         emb = self.proj(feat)
         return emb
 
