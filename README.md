@@ -29,7 +29,7 @@ How to Train
 환경 설정 확인: config.yaml 파일 내의 데이터 경로와 하이퍼파라미터가 적절한지 확인
 학습 실행: Bash에서 python src/lpcvc_retrieval/train.py --config config.yaml (python3일 수도 있음)
 
- **Main Changes Note (v2-mobilenetv4)**
+ **Main Changes Note (v2-mobilenetv4) [26.01.26]**
 
 > 자세한 내용은 [CHANGELOG_mobilenetv4.md](./CHANGELOG_mobilenetv4.md)를 확인하세요.
 
