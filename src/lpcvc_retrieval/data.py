@@ -1,16 +1,21 @@
 from __future__ import annotations
-import os, json
+
+import json
+import os
+import random
 from collections import defaultdict
-from typing import List, Tuple, Dict, Any, Optional
+from typing import Any, Dict, List, Tuple
 
 import torch
+from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
-from PIL import Image
 from transformers import CLIPTokenizer
+
 
 def build_tokenizer() -> CLIPTokenizer:
     return CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+
 
 def _img_transform_train(augment: bool = True) -> transforms.Compose:
     """
@@ -31,6 +36,7 @@ def _img_transform_train(augment: bool = True) -> transforms.Compose:
     else:
         return _img_transform_eval()
 
+
 def _img_transform_eval() -> transforms.Compose:
     """Evaluation transform: deterministic resize and center crop."""
     return transforms.Compose([
@@ -39,9 +45,11 @@ def _img_transform_eval() -> transforms.Compose:
         transforms.ToTensor(),  # [0,1]
     ])
 
+
 # Legacy alias for backward compatibility
 def _img_transform() -> transforms.Compose:
     return _img_transform_eval()
+
 
 class JsonlRetrievalDataset(Dataset):
     """
@@ -85,11 +93,10 @@ class JsonlRetrievalDataset(Dataset):
             # [수정] 파일명에서 숫자 image_id 추출 (예: 000000123456.jpg -> 123456)
             try:
                 image_id = int(os.path.basename(img_rel).split('.')[0])
-            except:
+            except (ValueError, IndexError):
                 image_id = idx 
 
             if len(caps) > 1:
-                import random
                 pool = caps if self.max_caps_per_image >= len(caps) else random.sample(caps, k=self.max_caps_per_image)
                 cap = random.choice(pool)
             else:
@@ -121,6 +128,7 @@ class JsonlRetrievalDataset(Dataset):
         # 기존: return x, input_ids, cap
         # 변경: 아래와 같이 return하여 loss 계산 시 image_id를 쓸 수 있게 합니다.
         return x, input_ids, meta
+
 
 class CocoCaptionsRetrievalDataset(Dataset):
     """
@@ -199,7 +207,6 @@ class CocoCaptionsRetrievalDataset(Dataset):
             img_rel, image_id, caps = item
 
             if self.is_train and len(caps) > 1:
-                import random
                 pool = caps if self.max_caps_per_image >= len(caps) else random.sample(caps, k=self.max_caps_per_image)
                 cap = random.choice(pool)
             else:
@@ -229,6 +236,7 @@ class CocoCaptionsRetrievalDataset(Dataset):
             "img_rel": img_rel,
         }
         return x, input_ids, meta
+
 
 def make_datasets(cfg, tokenizer: CLIPTokenizer):
     mode = str(cfg.data.get("mode", "jsonl")).lower()
@@ -275,6 +283,7 @@ def make_datasets(cfg, tokenizer: CLIPTokenizer):
         augment=False,
     )
     return train_ds, val_ds
+
 
 def collate_fn(batch):
     imgs = torch.stack([b[0] for b in batch], dim=0).float()

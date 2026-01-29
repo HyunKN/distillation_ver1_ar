@@ -138,3 +138,42 @@ python scripts/export_onnx_split.py --config config.yaml --ckpt runs/lpcvc_clip_
 | I2T R@10 | 60-65% |
 | T2I R@10 | 55-60% |
 | 추론 속도 | FastViT 대비 ~2배 향상 |
+
+---
+
+## 2026-01-30: 코드 리팩토링 및 환경 개선 (Refactoring & Optimization)
+
+@python-pro, @ml-engineer, @debugger, @code-reviewer 스킬을 활용하여 프로젝트 전반의 코드 품질과 실행 환경을 개선했습니다.
+
+### 1. 주요 변경 사항
+- **Editable Install 도입**: `pip install -e .`를 사용하여 패키지를 설치하도록 변경. `sys.path` 조작 코드 제거.
+- **WandB 모듈화**: `src/lpcvc_retrieval/logger.py`로 로깅 로직 분리.
+- **DataLoader 최적화**: `persistent_workers=True` 추가로 Epoch 시작 속도 개선.
+- **torch.compile 지원**: PyTorch 2.x 컴파일 기능 추가 (학습 가속).
+- **코드 품질**: 불필요한 `if True:` 제거 및 PEP 8 준수 Import 정리.
+
+### 2. WandB (Weights & Biases) 사용 가이드
+
+실험 추적을 위해 WandB를 사용할 수 있습니다 (선택 사항).
+
+#### 1) 사전 준비
+```bash
+pip install wandb
+wandb login
+# API Key 입력 (https://wandb.ai/authorize 에서 확인)
+```
+
+#### 2) 활성화 방법 (`config.yaml`)
+WandB를 사용하려면 `config.yaml`의 `train` 섹션을 수정하세요.
+
+```yaml
+train:
+  use_wandb: true                  # WandB 사용 여부 (기본값: false)
+  wandb_project: "lpcvc-clip-lite" # WandB 프로젝트 이름
+  wandb_run_name: "mobilenetv4-v1" # (선택) 실험 이름 (비워두면 자동 생성)
+```
+
+#### 3) 로깅되는 정보
+- **Step 단위**: Loss, Learning Rate
+- **Epoch 단위**: Validation R@10 (I2T, T2I)
+- **제거 방법**: `config.yaml`에서 `use_wandb: false`로 설정하거나 `logger.py` 삭제 후 `train.py` 수정

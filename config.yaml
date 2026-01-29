@@ -1,7 +1,7 @@
 data:
   batch_size: 128
-  coco_root: dataset/coco
-  image_root: dataset/coco
+  coco_root: ./data/coco
+  image_root: ./data/coco
   max_captions_per_image: 5
   mode: coco
   num_workers: 4
@@ -65,3 +65,10 @@ train:
   lr: 5.0e-4
   warmup_epochs: 3.0
   weight_decay: 0.05
+  # WandB 실험 추적 (선택적)
+  use_wandb: false
+  wandb_project: lpcvc-clip-lite
+  wandb_run_name: null  # null이면 자동 생성
+  # torch.compile 학습 가속 (선택적, PyTorch 2.x)
+  use_compile: false
+

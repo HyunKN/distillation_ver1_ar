@@ -22,12 +22,11 @@ class VisionTower(nn.Module):
         import timm
         self.backbone = timm.create_model(backbone, pretrained=bool(pretrained), num_classes=0, global_pool="avg")
         feat_dim = getattr(self.backbone, "num_features", None)
-        # Force inference of feat_dim for MobileNetV4 compatibility
-        if True:
-            with torch.no_grad():
-                x = torch.zeros(2, 3, 224, 224)
-                y = self.backbone(x)
-                feat_dim = y.flatten(1).shape[1]
+        # Infer feat_dim for MobileNetV4 compatibility
+        with torch.no_grad():
+            x = torch.zeros(2, 3, 224, 224)
+            y = self.backbone(x)
+            feat_dim = y.flatten(1).shape[1]
         self.proj = nn.Linear(int(feat_dim), int(embed_dim), bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -207,3 +206,42 @@ class OnnxWrapper(nn.Module):
     def forward(self, image: torch.Tensor, text_input: torch.Tensor):
         img, txt = self.model(image, text_input)
         return img, txt
+
+
+def create_model_from_config(cfg, vocab_size: int, eos_id: int) -> ClipLite:
+    """
+    Factory function to create ClipLite model from config.
+    
+    This eliminates code duplication across scripts (eval.py, export_onnx.py, etc.)
+    
+    Args:
+        cfg: Configuration object with model parameters (CfgNode or similar)
+        vocab_size: Vocabulary size from tokenizer
+        eos_id: End-of-sequence token ID from tokenizer
+    
+    Returns:
+        ClipLite model instance (not moved to device yet)
+    
+    Example:
+        tok = build_tokenizer()
+        model = create_model_from_config(cfg, tok.vocab_size, tok.eos_token_id)
+        model = model.to(device)
+    """
+    return ClipLite(
+        vision_backbone=str(cfg.model.vision_backbone),
+        vision_pretrained=bool(cfg.model.get("vision_pretrained", True)),
+        normalize_input=bool(cfg.model.get("normalize_input", True)),
+        clip_mean=list(cfg.model.get("clip_mean", [0.48145466, 0.4578275, 0.40821073])),
+        clip_std=list(cfg.model.get("clip_std", [0.26862954, 0.26130258, 0.27577711])),
+        embed_dim=int(cfg.model.get("embed_dim", 256)),
+        vocab_size=vocab_size,
+        context_length=77,
+        text_width=int(cfg.model.get("text_width", 256)),
+        text_layers=int(cfg.model.get("text_layers", 4)),
+        text_heads=int(cfg.model.get("text_heads", 4)),
+        text_mlp_ratio=float(cfg.model.get("text_mlp_ratio", 4.0)),
+        dropout=float(cfg.model.get("dropout", 0.0)),
+        temperature_init=float(cfg.model.get("temperature_init", 0.07)),
+        eos_id=eos_id,
+    )
+

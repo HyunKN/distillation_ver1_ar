@@ -13,6 +13,7 @@ from .model import ClipLite
 # siglip_loss와 multi_gt_masked_contrastive_loss를 추가
 from .losses import clip_contrastive_loss, pairwise_ranking_loss, siglip_loss, multi_gt_masked_contrastive_loss
 from .metrics import recall_at_1_5_10, bidirectional_recall, format_metrics, coco_bidirectional_recall
+from .logger import TrainLogger  # [OPTIONAL] WandB - 제거 시 이 줄 삭제
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -148,6 +149,22 @@ def train(cfg) -> str:
         temperature_init=float(cfg.model.get("temperature_init", 0.07)),
         eos_id=eos_id,
     ).to(device)
+
+    # ---- [OPTIONAL] torch.compile (PyTorch 2.x 학습 가속) ----
+    use_compile = bool(cfg.train.get("use_compile", False))
+    if use_compile and hasattr(torch, "compile"):
+        print("[torch.compile] Compiling model...")
+        model = torch.compile(model)
+        print("[torch.compile] Done!")
+
+    # ---- [OPTIONAL] WandB Logger ----
+    use_wandb = bool(cfg.train.get("use_wandb", False))
+    logger = TrainLogger(
+        use_wandb=use_wandb,
+        project=str(cfg.train.get("wandb_project", "lpcvc-clip-lite")),
+        run_name=cfg.train.get("wandb_run_name"),
+        config=cfg.as_dict() if hasattr(cfg, "as_dict") else dict(cfg),
+    )
 
     # ---- data ----
     train_ds, val_ds = make_datasets(cfg, tokenizer)
@@ -330,6 +347,8 @@ def train(cfg) -> str:
                 if teacher is not None:
                     postfix["distill"] = f"{distill_loss_val.item():.4f}"
                 pbar.set_postfix(postfix)
+                # [OPTIONAL] WandB step logging
+                logger.log({"train/loss": loss.item(), "train/lr": current_lr})
 
         # save checkpoints
         ckpt = {"model": model.state_dict(), "config": cfg.as_dict(), "epoch": epoch + 1}
@@ -348,5 +367,10 @@ def train(cfg) -> str:
                 best_r10 = r10
                 torch.save(ckpt, best_path)
                 print(f"  -> New best model saved! R@10={r10*100:.2f}%")
+            # [OPTIONAL] WandB epoch logging
+            logger.log_epoch(epoch + 1, {"val/I2T_R@10": r10, "val/T2I_R@10": metrics["T2I"]["R@10"]})
+
+    # [OPTIONAL] WandB finish
+    logger.finish()
 
     return best_path if os.path.exists(best_path) else last_path
