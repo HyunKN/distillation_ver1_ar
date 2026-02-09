@@ -1,7 +1,7 @@
 """
 QAI Hub Compile & Profile Script for LPCVC CLIP-Lite
 - Compiles image and text encoders to QNN
-- Profiles on target device (Snapdragon 8 Elite QRD)
+- Profiles on target device (XR2 Gen 2 - LPCVC 2026 Track 1 target)
 """
 import argparse
 import qai_hub
@@ -40,8 +40,9 @@ def main():
     ap.add_argument("--onnx_dir", default="exported_onnx", help="Directory containing ONNX files")
     ap.add_argument("--img_name", default="image_encoder.onnx", help="Image encoder ONNX filename")
     ap.add_argument("--txt_name", default="text_encoder.onnx", help="Text encoder ONNX filename")
-    ap.add_argument("--device", default="Snapdragon 8 Elite QRD", help="Target device name")
+    ap.add_argument("--device", default="XR2 Gen 2 (Proxy)", help="Target device name (LPCVC 2026: XR platform)")
     ap.add_argument("--skip_profile", action="store_true", help="Skip profiling step")
+    ap.add_argument("--share", action="store_true", help="Share with LPCVC organizers (lowpowervision@gmail.com)")
     args = ap.parse_args()
 
     # Construct full paths
@@ -102,6 +103,17 @@ def main():
     print(f"\n✅ Compilation Summary:")
     print(f"  Image Encoder Job: {img_compile_job.job_id}")
     print(f"  Text Encoder Job:  {txt_compile_job.job_id}")
+
+    # Share with LPCVC organizers (optional)
+    if args.share:
+        lpcvc_email = "lowpowervision@gmail.com"
+        print(f"\n📤 Sharing compile jobs with LPCVC organizers ({lpcvc_email})...")
+        try:
+            img_compile_job.modify_sharing(add_emails=[lpcvc_email])
+            txt_compile_job.modify_sharing(add_emails=[lpcvc_email])
+            print(f"  ✅ Shared successfully!")
+        except Exception as e:
+            print(f"  ⚠️ Sharing failed: {e}")
 
     # Profile models (optional)
     if not args.skip_profile:

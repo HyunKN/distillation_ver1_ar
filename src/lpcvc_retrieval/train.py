@@ -8,12 +8,18 @@ from tqdm import tqdm
 
 from .config import resolve_device
 from .data import build_tokenizer, make_datasets, collate_fn
-from .distill import DistillConfig, ClipTeacher, compute_affinity_distill_loss
-from .model import ClipLite
-# siglip_loss와 multi_gt_masked_contrastive_loss를 추가
-from .losses import clip_contrastive_loss, pairwise_ranking_loss, siglip_loss, multi_gt_masked_contrastive_loss
+from .distill import DistillConfig, compute_affinity_distill_loss
+from .mobileclip2 import MobileCLIP2Student  # Apple MobileCLIP2 Student Model
+# Loss 함수 import
+from .losses import (
+    pairwise_ranking_loss, 
+    siglip_loss, 
+    hard_negative_contrastive_loss,
+    text_text_contrastive_loss,
+)
 from .metrics import recall_at_1_5_10, bidirectional_recall, format_metrics, coco_bidirectional_recall
 from .logger import TrainLogger  # [OPTIONAL] WandB - 제거 시 이 줄 삭제
+from .ema import EMA  # [NEW] EMA for training stabilization
 
 def set_seed(seed: int):
     random.seed(seed)
@@ -128,27 +134,19 @@ def train(cfg) -> str:
     vocab_size = int(tokenizer.vocab_size)
     eos_id = int(tokenizer.eos_token_id)
 
-    # ---- model ----
-    clip_mean = list(cfg.model.get("clip_mean", [0.48145466, 0.4578275, 0.40821073]))
-    clip_std  = list(cfg.model.get("clip_std",  [0.26862954, 0.26130258, 0.27577711]))
-
-    model = ClipLite(
-        vision_backbone=str(cfg.model.vision_backbone),
-        vision_pretrained=bool(cfg.model.get("vision_pretrained", True)),
-        normalize_input=bool(cfg.model.get("normalize_input", True)),
-        clip_mean=clip_mean,
-        clip_std=clip_std,
-        embed_dim=int(cfg.model.get("embed_dim", 256)),
-        vocab_size=vocab_size,
-        context_length=77,
-        text_width=int(cfg.model.get("text_width", 256)),
-        text_layers=int(cfg.model.get("text_layers", 4)),
-        text_heads=int(cfg.model.get("text_heads", 4)),
-        text_mlp_ratio=float(cfg.model.get("text_mlp_ratio", 4.0)),
-        dropout=float(cfg.model.get("dropout", 0.0)),
-        temperature_init=float(cfg.model.get("temperature_init", 0.07)),
-        eos_id=eos_id,
+    # ---- model: MobileCLIP2 Student ----
+    embed_dim = int(cfg.model.get("embed_dim", 256))
+    variant = str(cfg.model.get("mobileclip2_variant", "S4"))
+    freeze_backbone = bool(cfg.model.get("freeze_backbone", False))
+    checkpoint_path = cfg.model.get("checkpoint_path", None)
+    
+    model = MobileCLIP2Student(
+        variant=variant,
+        embed_dim=embed_dim,
+        freeze_backbone=freeze_backbone,
+        checkpoint_path=checkpoint_path,
     ).to(device)
+    print(f"[Model] MobileCLIP2-{variant} (embed_dim={embed_dim}, freeze={freeze_backbone})")
 
     # ---- [OPTIONAL] torch.compile (PyTorch 2.x 학습 가속) ----
     use_compile = bool(cfg.train.get("use_compile", False))
@@ -168,23 +166,26 @@ def train(cfg) -> str:
 
     # ---- data ----
     train_ds, val_ds = make_datasets(cfg, tokenizer)
+    num_workers = int(cfg.data.get("num_workers", 4))
     train_loader = DataLoader(
         train_ds,
         batch_size=int(cfg.data.get("batch_size", 64)),
         shuffle=True,
-        num_workers=int(cfg.data.get("num_workers", 4)),
+        num_workers=num_workers,
         pin_memory=(device == "cuda"),
         collate_fn=collate_fn,
         drop_last=True,
+        persistent_workers=True if num_workers > 0 else False,
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=int(cfg.data.get("batch_size", 64)),
         shuffle=False,
-        num_workers=int(cfg.data.get("num_workers", 4)),
+        num_workers=num_workers,
         pin_memory=(device == "cuda"),
         collate_fn=collate_fn,
         drop_last=False,
+        persistent_workers=True if num_workers > 0 else False,
     )
 
     # ---- training hparams ----
@@ -200,6 +201,11 @@ def train(cfg) -> str:
     w_rank = float(cfg.loss.get("w_rank", 0.0))
     rank_k = int(cfg.loss.get("rank_k", 3))
     rank_margin = float(cfg.loss.get("rank_margin", 0.1))
+
+    # [NEW] Paper-based loss weights (BLIP, FG-CLIP, TULIP)
+    w_hard_negative = float(cfg.loss.get("w_hard_negative", 0.0))
+    w_text_text = float(cfg.loss.get("w_text_text", 0.0))
+    hard_negative_k = int(cfg.loss.get("hard_negative_k", 5))
 
     # distill loss weight (NEW: actually used)
     w_distill_affinity = float(cfg.loss.get("w_distill_affinity", 0.0))
@@ -225,24 +231,29 @@ def train(cfg) -> str:
 
     # ---- (2) teacher 준비: epoch loop 들어가기 전에 딱 1번만! ----
     distill_section = cfg.get("distill", {})  # 없으면 {}
-    if hasattr(distill_section, "as_dict"):
-        distill_section = distill_section.as_dict()
+    
+    # Helper to clean up OmegaConf/yacs objects
+    def _to_clean_dict(obj):
+        if hasattr(obj, 'as_dict'): return _to_clean_dict(obj.as_dict())
+        if isinstance(obj, list): return [_to_clean_dict(x) for x in obj]
+        if isinstance(obj, dict): return {k: _to_clean_dict(v) for k,v in obj.items()}
+        return obj
+
+    distill_section = _to_clean_dict(distill_section)
+    from .distill import DistillConfig, create_teacher
     distill_cfg = DistillConfig(**distill_section) if isinstance(distill_section, dict) else DistillConfig()
 
     teacher = None
-    if distill_cfg.use_teacher and w_distill_affinity > 0:
+    if distill_cfg.use_teacher:
         if device != "cuda":
             print("[Warn] distill.use_teacher=True but device is not cuda. Teacher may be slow on CPU.")
-        teacher = ClipTeacher(
-            model_name=distill_cfg.teacher_model_name,
-            pretrained=distill_cfg.teacher_pretrained,
-            device=str(device),
-        )
-        print(f"[Distill] Teacher ON: {distill_cfg.teacher_model_name} ({distill_cfg.teacher_pretrained}), "
-              f"w_affinity={w_distill_affinity}, thr={distill_cfg.distill_margin_thr}, temp={distill_cfg.affinity_temp}, "
-              f"columns={distill_cfg.affinity_columns}")
-    else:
-        print("[Distill] Teacher OFF")
+        
+        try:
+            teacher = create_teacher(distill_cfg, device=str(device))
+            print(f"[Train] Teacher initialized: {teacher}")
+        except Exception as e:
+            print(f"[Train] Failed to load teacher: {e}")
+            raise e
 
     best_r10 = -1.0
     best_path = os.path.join(out_dir, "best.pt")
@@ -254,7 +265,18 @@ def train(cfg) -> str:
     print(f"[Config] epochs={epochs}, warmup={warmup_epochs}, lr={lr}, grad_clip={grad_clip}")
     print(f"[Config] w_contrastive={w_contrastive}, w_rank={w_rank}, w_distill_affinity={w_distill_affinity}, "
           f"label_smoothing={label_smoothing}")
+    print(f"[Config] w_hard_negative={w_hard_negative}, w_text_text={w_text_text}, hard_negative_k={hard_negative_k}")
     print(f"[Config] logit_scale_range=[{logit_scale_min}, {logit_scale_max}]")
+
+    # ---- [NEW] EMA 초기화 ----
+    use_ema = bool(cfg.train.get("use_ema", True))
+    ema_decay = float(cfg.train.get("ema_decay", 0.999))
+    ema = None
+    if use_ema:
+        ema = EMA(model, decay=ema_decay)
+        print(f"[EMA] Enabled with decay={ema_decay}")
+    else:
+        print("[EMA] Disabled")
 
     for epoch in range(epochs):
         model.train()
@@ -288,18 +310,32 @@ def train(cfg) -> str:
                         img_emb, txt_emb, model.logit_scale,
                         k=rank_k, margin=rank_margin,
                     )
+                
+                # [NEW] Hard Negative Mining Loss (BLIP/FG-CLIP)
+                if w_hard_negative > 0:
+                    loss = loss + w_hard_negative * hard_negative_contrastive_loss(
+                        img_emb, txt_emb, model.logit_scale,
+                        num_hard_negatives=hard_negative_k,
+                    )
+                
+                # [NEW] Text-Text Contrastive Loss (TULIP)
+                if w_text_text > 0:
+                    loss = loss + w_text_text * text_text_contrastive_loss(
+                        txt_emb, image_ids, model.logit_scale,
+                    )
 
             # ---- distill (outside autocast for teacher stability) ----
+            # ---- distill (outside autocast for teacher stability) ----
             if teacher is not None:
-                # teacher expects CLIP-normalized pixel_values ideally
-                imgs_fp32 = imgs.float()
-                if bool(cfg.model.get("normalize_input", True)):
-                    imgs_teacher = _normalize_clip(imgs_fp32, clip_mean, clip_std)
-                else:
-                    imgs_teacher = imgs_fp32
+                # teacher expects RAW [0,1] images (OpenClipTeacher handles normalization)
+                imgs_teacher = imgs.float()
+                
+                # Extract raw captions from metas (each teacher tokenizes independently)
+                raw_captions = [m['caption'] for m in metas]
 
                 with torch.no_grad():
-                    t_img, t_txt = teacher(imgs_teacher, toks)
+                    # Returns (img, txt) OR [(img, txt), ...]
+                    teacher_out = teacher(imgs_teacher, raw_captions)
 
                 # student normalize for cosine space (safe even if model already normalizes)
                 s_img = F.normalize(img_emb.float(), dim=-1)
@@ -308,8 +344,7 @@ def train(cfg) -> str:
                 distill_loss_val = compute_affinity_distill_loss(
                     student_img=s_img,
                     student_txt=s_txt,
-                    teacher_img=t_img,
-                    teacher_txt=t_txt,
+                    teacher_output=teacher_out,
                     affinity_temp=distill_cfg.affinity_temp,
                     affinity_columns=distill_cfg.affinity_columns,
                     distill_margin_thr=distill_cfg.distill_margin_thr,
@@ -337,6 +372,10 @@ def train(cfg) -> str:
             with torch.no_grad():
                 model.logit_scale.data.clamp_(logit_scale_min, logit_scale_max)
 
+            # [NEW] EMA update
+            if ema is not None:
+                ema.update()
+
             if step % log_every == 0:
                 current_lr = scheduler.get_last_lr()[0]
                 postfix = {
@@ -352,6 +391,9 @@ def train(cfg) -> str:
 
         # save checkpoints
         ckpt = {"model": model.state_dict(), "config": cfg.as_dict(), "epoch": epoch + 1}
+        # [NEW] EMA state 저장
+        if ema is not None:
+            ckpt["ema"] = ema.state_dict()
         torch.save(ckpt, last_path)
         
         # save epoch-specific checkpoint
@@ -359,6 +401,10 @@ def train(cfg) -> str:
         torch.save(ckpt, epoch_path)
 
         if (epoch + 1) % eval_every == 0:
+            # [NEW] EMA 가중치로 평가 (EMA 사용 시)
+            if ema is not None:
+                ema.apply_shadow()
+            
             metrics = evaluate(model, val_loader, device, use_bidirectional=True)
             r10 = metrics["I2T"]["R@10"]
             print(f"[epoch {epoch+1}] {format_metrics(metrics)}")
@@ -367,6 +413,11 @@ def train(cfg) -> str:
                 best_r10 = r10
                 torch.save(ckpt, best_path)
                 print(f"  -> New best model saved! R@10={r10*100:.2f}%")
+            
+            # [NEW] EMA 복원
+            if ema is not None:
+                ema.restore()
+            
             # [OPTIONAL] WandB epoch logging
             logger.log_epoch(epoch + 1, {"val/I2T_R@10": r10, "val/T2I_R@10": metrics["T2I"]["R@10"]})
 

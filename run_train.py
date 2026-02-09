@@ -53,7 +53,7 @@ def main():
     print("  MobileCLIP2-Retrieval-Optimization Training")
     print("=" * 60)
     print(f"  Device: {device_info}")
-    print(f"  Vision Backbone: {cfg.model.vision_backbone}")
+    print(f"  MobileCLIP2 Variant: {cfg.model.mobileclip2_variant}")
     print(f"  Epochs: {cfg.train.epochs}")
     print(f"  Batch Size: {cfg.data.batch_size}")
     print(f"  Learning Rate: {cfg.train.lr}")

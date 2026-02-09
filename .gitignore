@@ -19,6 +19,8 @@ data/
 # Checkpoints & Logs
 runs/
 logs/
+checkpoints/
+wandb/
 *.pt
 *.pth
 *.ckpt

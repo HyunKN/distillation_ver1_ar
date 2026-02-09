@@ -1,7 +1,7 @@
 data:
   batch_size: 128
-  coco_root: ./data/coco
-  image_root: ./data/coco
+  coco_root: ./dataset/coco  # 상대 경로로 변경 (본인 환경에 맞게 수정)
+  image_root: ./dataset/coco  # 상대 경로로 변경
   max_captions_per_image: 5
   mode: coco
   num_workers: 4
@@ -14,12 +14,27 @@ data:
   val_split: val2017
 device: cuda
 distill:
-  affinity_columns: false
-  affinity_temp: 0.1
-  distill_margin_thr: 0.2
-  teacher_model_name: ViT-B-32
-  teacher_pretrained: openai
   use_teacher: true
+  
+  # Dual Teacher Setup for A100 (SigLIP 2 Giant + MetaCLIP 2 Huge)
+  teachers:
+    # Teacher 1: Google SigLIP 2 Giant (Efficiency & Alignment)
+    # Model name 'ViT-gopt-16-SigLIP2-256' requires open_clip >= 2.29
+    - name: ViT-gopt-16-SigLIP2-256
+      pretrained: webli
+      weight: 0.6
+      input_size: 256
+      
+    # Teacher 2: MetaCLIP 2 Huge (Absolute Performance & Long-tail)
+    - name: ViT-H-14-quickgelu
+      pretrained: metaclip_fullcc
+      weight: 0.4
+      input_size: 224
+      
+  # Distillation strategy settings
+  distill_margin_thr: 0.2          # selective distill threshold
+  affinity_temp: 0.1
+  affinity_columns: false
 export:
   onnx_path: model.onnx
   opset: 18
@@ -30,27 +45,18 @@ loss:
   w_contrastive: 1.0
   w_distill_affinity: 0.8
   w_rank: 0.1
+  # [NEW] Paper-based losses (BLIP, FG-CLIP, TULIP)
+  w_hard_negative: 0.1      # Hard Negative Mining Loss weight
+  w_text_text: 0.05         # Text-Text Contrastive Loss weight
+  hard_negative_k: 5        # Number of hard negatives to select
 model:
-  # MobileNetV4-Medium: LPCVC 대회 최적 백본 (FastViT 대비 2배 빠름)
-  vision_backbone: mobilenetv4_conv_medium.e500_r224_in1k
-  vision_pretrained: true
-  # ImageNet normalization (MobileNetV4 pretrained weights 호환)
-  clip_mean:
-  - 0.485
-  - 0.456
-  - 0.406
-  clip_std:
-  - 0.229
-  - 0.224
-  - 0.225
-  normalize_input: true
-  embed_dim: 256
-  text_width: 256
-  text_layers: 4
-  text_heads: 4
-  text_mlp_ratio: 4.0
-  dropout: 0.0
-  temperature_init: 0.07
+  # MobileCLIP2 Student Model (Apple, MIT License)
+  mobileclip2_variant: S4     # S0, S2, S3, S4, B, L-14 variants
+  # 체크포인트 다운로드: huggingface-cli download apple/MobileCLIP2-S4
+  checkpoint_path: null       # null이면 auto-download 시도, 또는 로컬 경로 지정
+  freeze_backbone: false     # A100에서는 전체 fine-tuning 가능
+  embed_dim: 256              # 임베딩 차원
+  temperature_init: 0.07      # logit_scale 초기값
   logit_scale_min: -4.6
   logit_scale_max: 4.6
 output:
@@ -58,7 +64,7 @@ output:
 seed: 42
 train:
   amp: true
-  epochs: 30
+  epochs: 10
   eval_every_epochs: 1
   grad_clip: 1.0
   log_every: 20
@@ -69,6 +75,8 @@ train:
   use_wandb: false
   wandb_project: lpcvc-clip-lite
   wandb_run_name: null  # null이면 자동 생성
-  # torch.compile 학습 가속 (선택적, PyTorch 2.x)
-  use_compile: false
-
+  # torch.compile 학습 가속 (PyTorch 2.x)
+  use_compile: true   # A100에서 10-30% 학습 가속
+  # EMA (Exponential Moving Average)
+  use_ema: true
+  ema_decay: 0.999
