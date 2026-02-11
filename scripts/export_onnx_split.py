@@ -15,6 +15,7 @@ def main():
     ap.add_argument("--ckpt", required=True)
     ap.add_argument("--out_dir", default="exported_onnx")
     ap.add_argument("--prefix", default="", help="Optional prefix for output filenames")
+    ap.add_argument("--add_timestamp", action="store_true", help="Append timestamp to output filenames")
     ap.add_argument("--override", action="append", default=[])
     args = ap.parse_args()
 
@@ -26,10 +27,14 @@ def main():
     ckpt = torch.load(args.ckpt, map_location="cpu")
     model.load_state_dict(ckpt["model"], strict=True)
 
-    timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
     prefix = f"{args.prefix}_" if args.prefix else ""
-    img_name = f"{prefix}image_encoder_{timestamp}.onnx"
-    txt_name = f"{prefix}text_encoder_{timestamp}.onnx"
+    if args.add_timestamp:
+        timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+        img_name = f"{prefix}image_encoder_{timestamp}.onnx"
+        txt_name = f"{prefix}text_encoder_{timestamp}.onnx"
+    else:
+        img_name = f"{prefix}image_encoder.onnx"
+        txt_name = f"{prefix}text_encoder.onnx"
 
     opset = int(cfg.export.get("opset", 18))
     os.makedirs(args.out_dir, exist_ok=True)

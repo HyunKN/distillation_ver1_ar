@@ -53,12 +53,12 @@ def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps: int, num_traini
     return LambdaLR(optimizer, lr_lambda)
 
 @torch.no_grad()
-def evaluate(model: ClipLite, loader: DataLoader, device: str, use_bidirectional: bool = True, use_coco_eval: bool = True):
+def evaluate(model: MobileCLIP2Student, loader: DataLoader, device: str, use_bidirectional: bool = True, use_coco_eval: bool = True):
     """
     Evaluate model on retrieval metrics.
     
     Args:
-        model: ClipLite model
+        model: MobileCLIP2 student model
         loader: Validation data loader
         device: Device to run on
         use_bidirectional: If True, compute both I2T and T2I metrics
@@ -345,6 +345,7 @@ def train(cfg) -> str:
                     student_img=s_img,
                     student_txt=s_txt,
                     teacher_output=teacher_out,
+                    teachers_cfg=distill_cfg.teachers,
                     affinity_temp=distill_cfg.affinity_temp,
                     affinity_columns=distill_cfg.affinity_columns,
                     distill_margin_thr=distill_cfg.distill_margin_thr,

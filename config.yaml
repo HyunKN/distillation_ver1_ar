@@ -16,7 +16,7 @@ device: cuda
 distill:
   use_teacher: true
   
-  # Dual Teacher Setup for A100 (SigLIP 2 Giant + MetaCLIP 2 Huge)
+  # Dual Teacher Setup for A100 (SigLIP 2 Giant + MetaCLIP 2 Worldwide H/14)
   teachers:
     # Teacher 1: Google SigLIP 2 Giant (Efficiency & Alignment)
     # Model name 'ViT-gopt-16-SigLIP2-256' requires open_clip >= 2.29
@@ -25,9 +25,9 @@ distill:
       weight: 0.6
       input_size: 256
       
-    # Teacher 2: MetaCLIP 2 Huge (Absolute Performance & Long-tail)
-    - name: ViT-H-14-quickgelu
-      pretrained: metaclip_fullcc
+    # Teacher 2: MetaCLIP 2 Worldwide H/14 (strong multilingual & retrieval prior)
+    - name: ViT-H-14-worldwide-quickgelu
+      pretrained: metaclip2_worldwide
       weight: 0.4
       input_size: 224
       

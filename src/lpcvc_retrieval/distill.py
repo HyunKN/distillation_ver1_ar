@@ -121,9 +121,16 @@ class OpenClipTeacher(nn.Module):
                 mean = (0.48145466, 0.4578275, 0.40821073)
                 std = (0.26862954, 0.26130258, 0.27577711)
                 
-            # Ensure they are tensors on device
-            self.register_buffer('image_mean', torch.tensor(mean).view(1, 3, 1, 1))
-            self.register_buffer('image_std', torch.tensor(std).view(1, 3, 1, 1))
+            # Keep normalization buffers on the same device as teacher model.
+            # Without this, distillation can fail with CUDA/CPU device mismatch.
+            self.register_buffer(
+                "image_mean",
+                torch.as_tensor(mean, dtype=torch.float32, device=device).view(1, 3, 1, 1),
+            )
+            self.register_buffer(
+                "image_std",
+                torch.as_tensor(std, dtype=torch.float32, device=device).view(1, 3, 1, 1),
+            )
             
             # Load tokenizer for this specific teacher model
             self.tokenizer = open_clip.get_tokenizer(cfg.name)
@@ -217,7 +224,7 @@ def compute_affinity_distill_loss(
     student_img: torch.Tensor,
     student_txt: torch.Tensor,
     teacher_output: Union[Tuple[torch.Tensor, torch.Tensor], List[Tuple[torch.Tensor, torch.Tensor]]],
-    teachers_cfg: Optional[List[TeacherConfig]] = None, # passed if ensemble
+    teachers_cfg: Optional[List[TeacherConfig]] = None,
     affinity_temp: float = 0.1,
     affinity_columns: bool = False,
     distill_margin_thr: float = 0.2,
@@ -231,52 +238,41 @@ def compute_affinity_distill_loss(
     
     # Handle Ensemble
     if isinstance(teacher_output, list):
-        # Ensemble Case
-        total_loss = 0.0
-        # If teachers_cfg is not passed explicitly, we might struggle to know weights.
-        # But we can assume uniform or we need to pass weights.
-        # Let's assume standard weights if not provided (or we can extract from model if we had access)
-        
-        # Actually, `train.py` calls this. `train.py` doesn't know about weights.
-        # We should probably pre-calculate 'Target Logits' in EnsembleTeacher?
-        # NO, different teachers have different embedding spaces/scales.
-        # We must calculate Loss for EACH teacher and weighted-sum the LOSS.
-        
-        # We need weights.
-        # Hack: if teacher_output is list, we assume equal weights unless we find a way.
-        # Users usually config weights in config.yaml.
-        # Let's update this function signature in train.py call or rely on uniform for now
-        # OR better: EnsembleTeacher.forward() could return the Weighted Average Target Probability?
-        # No, KL divergence target is prob dist. 
-        # Average(Softmax(T1)) != Softmax(Average(T1))
-        # The correct Ensemble KD is usually: Loss = w1 * KL(S, T1) + w2 * KL(S, T2)
-        
-        # We will assume weights are available or just sum them directly (implying equal or pre-scaled).
-        # To strictly follow config weights, `train.py` needs to pass them.
-        # For now, let's just average the losses (simplification).
-        
-        for i, (t_img, t_txt) in enumerate(teacher_output):
-            t_sim = t_img @ t_txt.t()
-            
-            # Masking based on specific teacher? Or student confidence?
-            # Selective distill is based on Student Margin usually.
-            row_mask = None
-            if selective and distill_margin_thr > 0:
-                margin = _margin_from_logits(s_sim)
-                row_mask = margin < distill_margin_thr
-            
-            loss = affinity_kl_rows(s_sim, t_sim, temp=affinity_temp, row_mask=row_mask)
-            
+        if len(teacher_output) == 0:
+            return s_sim.new_tensor(0.0)
+
+        if teachers_cfg and len(teachers_cfg) == len(teacher_output):
+            weights = [max(0.0, float(cfg.weight)) for cfg in teachers_cfg]
+        else:
+            weights = [1.0] * len(teacher_output)
+
+        weight_sum = sum(weights)
+        if weight_sum <= 0:
+            weights = [1.0] * len(teacher_output)
+            weight_sum = float(len(weights))
+        norm_weights = [w / weight_sum for w in weights]
+
+        row_mask = None
+        col_mask = None
+        if selective and distill_margin_thr > 0:
+            margin = _margin_from_logits(s_sim)
+            row_mask = margin < distill_margin_thr
             if affinity_columns:
-                col_mask = None
-                if selective and distill_margin_thr > 0:
-                    margin_t = _margin_from_logits(s_sim.t())
-                    col_mask = margin_t < distill_margin_thr
+                margin_t = _margin_from_logits(s_sim.t())
+                col_mask = margin_t < distill_margin_thr
+
+        total_loss = s_sim.new_tensor(0.0)
+        for weight, (t_img, t_txt) in zip(norm_weights, teacher_output):
+            t_sim = t_img @ t_txt.t()
+
+            loss = affinity_kl_rows(s_sim, t_sim, temp=affinity_temp, row_mask=row_mask)
+
+            if affinity_columns:
                 loss += affinity_kl_rows(s_sim.t(), t_sim.t(), temp=affinity_temp, row_mask=col_mask)
-            
-            total_loss += loss
-            
-        return total_loss / len(teacher_output)
+
+            total_loss += weight * loss
+
+        return total_loss
 
     else:
         # Single Teacher Case
