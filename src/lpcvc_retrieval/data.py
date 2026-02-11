@@ -68,7 +68,10 @@ class JsonlRetrievalDataset(Dataset):
         # Use augmentation only for training
         self.tf = _img_transform_train(augment) if is_train else _img_transform_eval()
 
-        self.samples: List[Tuple[str, List[str]]] = []
+        # Train: (img_rel, image_id, captions)
+        # Eval:  (img_rel, image_id, caption, ann_id)
+        self.samples: List[Tuple[Any, ...]] = []
+        image_counter = 0
         with open(jsonl_path, "r", encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
@@ -78,9 +81,21 @@ class JsonlRetrievalDataset(Dataset):
                 caps = obj.get("captions", [])
                 if not isinstance(caps, list):
                     caps = [str(caps)]
+                caps = [c for c in caps if isinstance(c, str) and c.strip()]
                 if len(caps) == 0:
                     continue
-                self.samples.append((img_rel, caps))
+
+                try:
+                    image_id = int(os.path.basename(img_rel).split(".")[0])
+                except (ValueError, IndexError):
+                    image_id = image_counter
+                image_counter += 1
+
+                if self.is_train:
+                    self.samples.append((img_rel, image_id, caps))
+                else:
+                    for ann_id, cap in enumerate(caps):
+                        self.samples.append((img_rel, image_id, cap, ann_id))
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -89,12 +104,7 @@ class JsonlRetrievalDataset(Dataset):
         item = self.samples[idx]
 
         if self.is_train:
-            img_rel, caps = item
-            # [수정] 파일명에서 숫자 image_id 추출 (예: 000000123456.jpg -> 123456)
-            try:
-                image_id = int(os.path.basename(img_rel).split('.')[0])
-            except (ValueError, IndexError):
-                image_id = idx 
+            img_rel, image_id, caps = item
 
             if len(caps) > 1:
                 pool = caps if self.max_caps_per_image >= len(caps) else random.sample(caps, k=self.max_caps_per_image)

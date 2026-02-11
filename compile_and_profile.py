@@ -16,7 +16,7 @@ def compile_model(model, device, input_specs, name):
         model=model,
         device=device,
         input_specs=input_specs,
-        options="--target_runtime qnn_lib_aarch64_android --truncate_64bit_io"
+        options="--target_runtime qnn_dlc --truncate_64bit_io"
     )
     print(f"  Compile job ID: {compile_job.job_id}")
     print(f"  Waiting for compilation to complete...")
@@ -42,7 +42,6 @@ def main():
     ap.add_argument("--txt_name", default="text_encoder.onnx", help="Text encoder ONNX filename")
     ap.add_argument("--device", default="XR2 Gen 2 (Proxy)", help="Target device name (LPCVC 2026: XR platform)")
     ap.add_argument("--skip_profile", action="store_true", help="Skip profiling step")
-    ap.add_argument("--share", action="store_true", help="Share with LPCVC organizers (lowpowervision@gmail.com)")
     args = ap.parse_args()
 
     # Construct full paths
@@ -103,17 +102,6 @@ def main():
     print(f"\n✅ Compilation Summary:")
     print(f"  Image Encoder Job: {img_compile_job.job_id}")
     print(f"  Text Encoder Job:  {txt_compile_job.job_id}")
-
-    # Share with LPCVC organizers (optional)
-    if args.share:
-        lpcvc_email = "lowpowervision@gmail.com"
-        print(f"\n📤 Sharing compile jobs with LPCVC organizers ({lpcvc_email})...")
-        try:
-            img_compile_job.modify_sharing(add_emails=[lpcvc_email])
-            txt_compile_job.modify_sharing(add_emails=[lpcvc_email])
-            print(f"  ✅ Shared successfully!")
-        except Exception as e:
-            print(f"  ⚠️ Sharing failed: {e}")
 
     # Profile models (optional)
     if not args.skip_profile:
