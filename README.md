@@ -1,21 +1,20 @@
 # 🚀 MobileCLIP2 Retrieval Optimization
 
-> LPCVC 2026을 위한 경량 이미지-텍스트 검색 모델 최적화
+> LPCVC 2026을 위한 Apple MobileCLIP2-S0 기반 모바일 최적화 멀티모달 검색 모델
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 
 ## 📖 Overview
 
-Apple의 **MobileCLIP2-S4**를 SOTA Teacher 모델(SigLIP 2, MetaCLIP 2 Worldwide)로 증류하여 모바일에서 빠르게 동작하는 이미지-텍스트 검색 AI를 학습합니다.
+Apple의 **MobileCLIP2-S0** (이미지+텍스트 사전 학습 완성형 모델)을 학생 모델로 채택하고, SOTA Teacher 모델(SigLIP 2 Giant, MetaCLIP 2)로 지식 증류(Distillation)하여 모바일에서 빠르고 정확하게 동작하는 이미지-텍스트 검색 AI를 구축합니다.
 
 **핵심 특징:**
-- 🎓 **Dual Teacher Distillation**: SigLIP 2 Giant + MetaCLIP 2 Worldwide (H/14, OpenCLIP 기준 약 7.44GB)
-- ⚡ **Mobile-first**: 스마트폰에서 ~5ms 추론
-- 📱 **50MB 미만**: LPCVC 대회 규격 준수
-- 🔧 **최신 기술**: Mixed Precision, EMA, Gradient Clipping
-- ℹ️ 라이선스/대회 규정 검토 결과에 따라 Student 모델(MobileCLIP2-S4)은 추후 OSI 호환 대체 모델로 변경될 수 있습니다.
+- 🥇 **Multi-Modal Pre-trained Student**: 이미지-텍스트 매칭이 이미 사전 학습된 MobileCLIP2-S0 (11.4M Vision / 63.4M Text)
+- 🎓 **Dual Teacher Distillation**: SigLIP 2 Giant + MetaCLIP 2 Worldwide (H/14)
+- ⚡ **Mobile-first**: XR2 Gen 2 기준 Image 9.1ms / Text 3.5ms 실측
+- 🔧 **최신 기술**: Mixed Precision, EMA, Gradient Clipping, torch.compile
 
 ## 🏗️ Architecture
 
@@ -29,10 +28,12 @@ Apple의 **MobileCLIP2-S4**를 SOTA Teacher 모델(SigLIP 2, MetaCLIP 2 Worldwid
 │             │     Knowledge Distillation     │          │
 │             └─────────────┬─────────────────┘          │
 │                           ▼                             │
-│              ┌────────────────────────┐                │
-│              │   MobileCLIP2-S4       │                │
-│              │   (50MB, Student)      │                │
-│              └────────────────────────┘                │
+│          ┌──────────────────────────────┐              │
+│          │  MobileCLIP2-S0 (Apple)      │              │
+│          │  V: 11.4M (9.1ms) Image Enc │              │
+│          │  T: 63.4M (3.5ms) Text Enc  │              │
+│          │  Pre-trained Multi-Modal     │              │
+│          └──────────────────────────────┘              │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -40,9 +41,11 @@ Apple의 **MobileCLIP2-S4**를 SOTA Teacher 모델(SigLIP 2, MetaCLIP 2 Worldwid
 
 본 프로젝트는 고성능 이미지 검색 AI를 스마트폰 환경에 맞게 최적화하기 위해, **경량 학생 모델(Student)**과 압도적인 성능을 가진 두 개의 **선생님 모델(Teachers)**을 활용하는 **지식 증류(Knowledge Distillation)** 기법을 사용합니다.
 
-#### 📱 1. 학생 모델: MobileCLIP2-S4
-실제로 스마트폰 등 온디바이스(On-device) 환경에 배포되어 동작하는 소형 딥러닝 모델입니다.
-* **선택 이유:** 수 GB에 달하는 거대한 모델들은 모바일 기기에서 구동이 불가능하거나 극도로 느립니다. MobileCLIP2-S4는 용량이 단 50MB에 불과하면서도 스마트폰에서 5ms 내외의 초고속 추론이 가능하여, LPCVC 대회의 빡빡한 하드웨어 제한(경량, 저지연)에 완벽히 부합합니다.
+#### 📱 1. 학생 모델: Apple MobileCLIP2-S0
+실제로 스마트폰/XR 디바이스에서 작동할 초경량 멀티모달 모델입니다.
+* **비전 인코더 (11.4M params):** Apple이 모바일 NPU에 최적화하여 설계한 MobileOne 기반 아키텍처. XR2 Gen 2에서 **9.1ms** 실측.
+* **텍스트 인코더 (63.4M params):** 이미지-텍스트 매칭이 사전 학습된 내장 텍스트 인코더. XR2 Gen 2에서 **3.5ms** 실측.
+* **선택 이유:** 이미지와 텍스트를 연결하는 멀티모달 지식이 **이미 사전 학습 완료**된 상태이므로, 다른 조처럼 빈 깡통 부품(FastViT 등)을 조립하여 처음부터 가르칠 필요 없이 즉시 파인튜닝이 가능합니다. 동급 파라미터(11M) 대비 압도적인 Recall 성능을 발휘합니다.
 
 #### 🔍 2. 첫 번째 선생님: SigLIP 2 Giant
 학생 모델에게 **정밀한 텍스트-이미지 매칭 능력**을 전수해 줄 첫 번째 전문가 모델입니다.
@@ -68,39 +71,59 @@ pip install -r requirements.txt
 
 ### 2. Dataset Setup
 
-기본값은 COCO 모드(`data.mode: coco`)입니다.  
-`D:\LPCVC_Data`의 원본 4개 데이터셋(coco/flickr30k/open_images/wit)을 함께 쓰려면, 먼저 아래 스크립트로 프로젝트 JSONL 포맷으로 변환하세요.
+기본값은 JSONL 모드(`data.mode: jsonl`)입니다.  
+서버에서 프로젝트 루트 아래 `dataset/` 폴더를 사용할 때, 원본 4개 데이터셋(coco/flickr30k/open_images/wit)을 먼저 JSONL로 변환하세요.
 
 ```bash
-# 예시: Windows CMD
-python scripts\preprocess\parse_lpcvc_sources.py --data_root D:\LPCVC_Data --out_dir dataset\lpcvc --val_ratio 0.01
+# 예시: Windows CMD (프로젝트 루트에 dataset/가 있는 경우)
+python scripts\preprocess\parse_lpcvc_sources.py --data_root dataset --out_dir dataset\prepared_jsonl --val_ratio 0.01
 ```
 
 전량 변환 전에 샘플 검증(권장):
 
 ```bash
-python scripts\preprocess\parse_lpcvc_sources.py --data_root D:\LPCVC_Data --sample_per_source 5 --show_examples 12 --dry_run
+python scripts\preprocess\parse_lpcvc_sources.py --data_root dataset --sample_per_source 5 --show_examples 12 --dry_run
 ```
 
 용량 제한 서버용(예: 50GB) 축소 파싱 예시:
 
 ```bash
 # coco/flickr30k/wit는 전량 유지, open_images만 60,000장으로 제한
-python scripts\preprocess\parse_lpcvc_sources.py --data_root D:\LPCVC_Data --out_dir D:\LPCVC_Data\prepared_jsonl_50gb --source_caps open_images=60000 --val_ratio 0.01
+python scripts\preprocess\parse_lpcvc_sources.py --data_root dataset --out_dir dataset\prepared_jsonl_50gb --source_caps open_images=60000 --val_ratio 0.01
 ```
 
 운영 메모:
 - 현재는 용량 제약으로 축소셋(약 18.8만 장)을 사용합니다.
 - 추후 충분한 용량의 서버에서는 **약 30만 장 규모 데이터셋**으로 확장 학습할 예정입니다.
 
+#### 📊 내 데이터셋 구조 및 비율
+
+**[총 30만장]**
+- **coco:** 123,287장 (`train2017` 118,287 + `val2017` 5,000)
+- **flickr30k:** 63,566장
+- **open_images:** 125,436장
+- **wit:** 2,710장
+- **합계:** 314,999장 (중복 1벌을 제외한 실질 이미지는 대략 **283,216장** 수준)
+
+**[비율 (중복 제거 가정 총 283,216장 기준)]**
+- **open_images:** 125,436장 (44.29%)
+- **coco:** 123,287장 (43.53%)
+- **flickr30k:** 31,783장 (11.22%)
+- **wit:** 2,710장 (0.96%)
+
+**[메타데이터 샘플 수 (jsonl)]**
+- `prepared_jsonl`: train 275,212 / val 2,777 (총 277,989)
+- `prepared_jsonl_40gb`: train 185,678 / val 1,873
+- `prepared_jsonl_witcheck`: train 2,457 / val 24
+
 변환 후 `config.yaml`의 `data` 섹션을 아래처럼 바꿉니다:
 
 ```yaml
 data:
   mode: jsonl
-  image_root: D:/LPCVC_Data
-  train_jsonl: ./dataset/lpcvc/train.jsonl
-  val_jsonl: ./dataset/lpcvc/val.jsonl
+  image_root: dataset
+  train_jsonl: dataset/prepared_jsonl/train.jsonl
+  val_jsonl: dataset/prepared_jsonl/val.jsonl
 ```
 
 참고: 전처리 스크립트는 `scripts/preprocess/` 폴더로 분리되어 있습니다.
@@ -164,8 +187,8 @@ python -c "import qai_hub as hub; d=hub.Device('XR2 Gen 2 (Proxy)'); m=hub.get_j
 ├── config.yaml               # 설정 파일
 ├── src/lpcvc_retrieval/      # 핵심 코드
 │   ├── train.py              # 학습 로직
-│   ├── model.py              # 모델 정의
-│   ├── mobileclip2.py        # MobileCLIP2 로딩
+│   ├── model.py              # 모델 팩토리
+│   ├── mobileclip2.py        # MobileCLIP2-S0 학생 모델 래퍼
 │   ├── distill.py            # Teacher 모델 & Distillation
 │   ├── data.py               # 데이터 로딩
 │   └── losses.py             # 손실 함수
@@ -190,15 +213,18 @@ python -c "import qai_hub as hub; d=hub.Device('XR2 Gen 2 (Proxy)'); m=hub.get_j
 | `use_teacher` | true | Teacher Distillation 사용 |
 | `amp` | true | Mixed Precision 학습 |
 
-## 📊 Performance Targets
+## 📊 Performance Targets & Profiling (MobileCLIP2-S0)
 
-| Metric | Target | Description |
-|--------|--------|-------------|
-| R@1 | >25% | Top-1 Recall |
-| R@5 | >50% | Top-5 Recall |
-| R@10 | >60% | Top-10 Recall |
-| Latency | <10ms | 모바일 추론 시간 |
-| Model Size | <50MB | ONNX 파일 크기 |
+| Metric | Target | Current (XR2 Gen 2) | Description |
+|--------|--------|---------------------|-------------|
+| R@1 | >25% | - | Top-1 Recall |
+| R@5 | >50% | - | Top-5 Recall |
+| R@10 | >60% | - | Top-10 Recall |
+| Image Latency | <10ms | **9.1 ms** | 비전 인코더 단독 추론 (채점 기준) |
+| Text Latency | - | 3.5 ms | 텍스트 인코더 단독 추론 (사전 연산용) |
+| Image Params | - | **11.4 M** | 비전 인코더 모델 파라미터 수 |
+| Text Params | - | 63.4 M | 텍스트 인코더 모델 파라미터 수 |
+| Image Size (ONNX) | <50MB | 43.7 MB | 비전 인코더 모델 용량 |
 
 ## 🔬 Technical Details
 
@@ -209,15 +235,28 @@ python -c "import qai_hub as hub; d=hub.Device('XR2 Gen 2 (Proxy)'); m=hub.get_j
 
 ## 📚 References
 
-- [MobileCLIP2](https://github.com/apple/ml-mobileclip) - Apple
-- [SigLIP 2](https://arxiv.org/abs/2502.14786) - Google DeepMind
-- [MetaCLIP 2](https://github.com/facebookresearch/MetaCLIP) - Meta AI
+- [MobileCLIP2](https://github.com/apple/ml-mobileclip) - Apple ML Research (Student)
+- [SigLIP 2](https://arxiv.org/abs/2502.14786) - Google DeepMind (Teacher 1)
+- [MetaCLIP 2](https://github.com/facebookresearch/MetaCLIP) - Meta AI (Teacher 2)
 - [Meta CLIP 2 Collection](https://huggingface.co/collections/facebook/meta-clip-2) - Hugging Face
 - [TinyCLIP](https://arxiv.org/abs/2309.12314) - Affinity Distillation
+- [OpenCLIP](https://github.com/mlfoundations/open_clip) - Model Loading Framework
 
 ## 📝 License
 
 This project is licensed under the MIT License.
+
+### Third-Party Model Licenses
+
+| 구분 | 라이선스 | 비고 |
+|---|---|---|
+| **프로젝트 코드** | MIT | 본 저장소 코드 |
+| **MobileCLIP2 (Student)** | Code: MIT / Weights: Apple ML Research TOU | [모델 카드 확인](https://huggingface.co/apple/MobileCLIP2-S0) |
+| **SigLIP 2 Giant (Teacher 1)** | Apache 2.0 | [모델 카드 확인](https://huggingface.co/timm/ViT-gopt-16-SigLIP2-256) |
+| **MetaCLIP 2 Worldwide (Teacher 2)** | CC-BY-NC-4.0 | 비상업 조항 포함. [모델 카드 확인](https://huggingface.co/facebook/metaclip-2-worldwide-huge-quickgelu) |
+| **OpenCLIP 프레임워크** | MIT | [저장소](https://github.com/mlfoundations/open_clip) |
+
+> ⚠️ 모델 가중치 재배포/상업 사용 전 각 모델 카드의 라이선스 원문을 반드시 재확인하세요.
 
 ## 🙏 Acknowledgements
 

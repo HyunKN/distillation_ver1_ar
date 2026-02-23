@@ -48,7 +48,7 @@
 
 ### 학생 모델 (실제 배포용)
 
-- 모델: `MobileCLIP2` (기본 `S4`)
+- 모델: `MobileCLIP2` (기본 `S0`)
 - 역할: 실제로 디바이스에서 실행되는 가벼운 모델
 - 코드: `src/lpcvc_retrieval/mobileclip2.py`
 
@@ -261,6 +261,13 @@ python compile_and_profile.py --onnx_dir exported_onnx --img_name image_encoder.
 ---
 
 ## 9. 데이터셋 모드 상세
+
+현재 `config.yaml` 기본값은 JSONL 모드입니다.
+
+- `data.mode: jsonl`
+- `data.image_root: dataset`
+- `data.train_jsonl: dataset/prepared_jsonl/train.jsonl`
+- `data.val_jsonl: dataset/prepared_jsonl/val.jsonl`
 
 ### COCO 모드 (`data.mode: coco`)
 
@@ -696,7 +703,7 @@ loss 조합 위치:
 
 | 구분 | 실제 사용/출처 | GitHub | Hugging Face | 라이선스/저작권 메모 |
 |---|---|---|---|---|
-| Student 모델 | Apple MobileCLIP2-S4 | https://github.com/apple/ml-mobileclip | https://huggingface.co/apple/MobileCLIP2-S4 | HF 표기: `apple-amlr`. Apple 저장소에는 `Code: MIT`, `ML models: Apple ML Research Model TOU`로 명시됨 |
+| Student 모델 | Apple MobileCLIP2-S0 | https://github.com/apple/ml-mobileclip | https://huggingface.co/apple/MobileCLIP2-S0 | HF 표기: `apple-amlr`. Apple 저장소에는 `Code: MIT`, `ML models: Apple ML Research Model TOU`로 명시됨 |
 | Teacher 1 | SigLIP2 Giant 계열 (`ViT-gopt-16-SigLIP2-256`) | https://github.com/google-research/big_vision | https://huggingface.co/timm/ViT-gopt-16-SigLIP2-256 (또는 https://huggingface.co/google/siglip2-giant-opt-patch16-256) | HF 표기: `apache-2.0` |
 | Teacher 2 | MetaCLIP 2 Worldwide H/14 (`ViT-H-14-worldwide-quickgelu`) | https://github.com/facebookresearch/MetaCLIP | https://huggingface.co/timm/vit_huge_patch14_clip_224.metaclip2_worldwide (OpenCLIP/timm), https://huggingface.co/facebook/metaclip-2-worldwide-huge-quickgelu (facebook), https://huggingface.co/collections/facebook/meta-clip-2 | HF 모델 카드 표기 기준 `cc-by-nc-4.0` (비상업 조항 포함, 사용 전 재확인 권장) |
 | 로딩 프레임워크 | OpenCLIP | https://github.com/mlfoundations/open_clip | (모델 허브는 각 모델 카드 참조) | OpenCLIP 저장소 라이선스: MIT |

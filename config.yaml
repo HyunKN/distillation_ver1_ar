@@ -1,16 +1,16 @@
 data:
   batch_size: 128
-  coco_root: ./dataset/coco  # 상대 경로로 변경 (본인 환경에 맞게 수정)
-  image_root: ./dataset/coco  # 상대 경로로 변경
+  coco_root: dataset/coco
+  image_root: dataset
   max_captions_per_image: 5
-  mode: coco
+  mode: jsonl
   num_workers: 4
   train_augment: true
   train_captions_json: annotations/captions_train2017.json
-  train_jsonl: train.jsonl
+  train_jsonl: dataset/prepared_jsonl/train.jsonl
   train_split: train2017
   val_captions_json: annotations/captions_val2017.json
-  val_jsonl: val.jsonl
+  val_jsonl: dataset/prepared_jsonl/val.jsonl
   val_split: val2017
 device: cuda
 distill:
@@ -51,8 +51,8 @@ loss:
   hard_negative_k: 5        # Number of hard negatives to select
 model:
   # MobileCLIP2 Student Model (Apple, MIT License)
-  mobileclip2_variant: S4     # S0, S2, S3, S4, B, L-14 variants
-  # 체크포인트 다운로드: huggingface-cli download apple/MobileCLIP2-S4
+  mobileclip2_variant: S0     # S0, S2, S3, S4, B, L-14 variants
+  # 체크포인트 다운로드: huggingface-cli download apple/MobileCLIP2-S0
   checkpoint_path: null       # null이면 auto-download 시도, 또는 로컬 경로 지정
   freeze_backbone: false     # A100에서는 전체 fine-tuning 가능
   embed_dim: 256              # 임베딩 차원
