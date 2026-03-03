@@ -8,11 +8,11 @@
 
 ## 📖 Overview
 
-Apple의 **MobileCLIP2-S0** (이미지+텍스트 사전 학습 완성형 모델)을 학생 모델로 채택하고, SOTA Teacher 모델(SigLIP 2 Giant, MetaCLIP 2)로 지식 증류(Distillation)하여 모바일에서 빠르고 정확하게 동작하는 이미지-텍스트 검색 AI를 구축합니다.
+Apple의 **MobileCLIP2-S0** (이미지+텍스트 사전 학습 완성형 모델)을 학생 모델로 채택하고, SOTA Teacher 모델(SigLIP 2 Giant, PE-Core bigG/14)로 지식 증류(Distillation)하여 모바일에서 빠르고 정확하게 동작하는 이미지-텍스트 검색 AI를 구축합니다.
 
 **핵심 특징:**
 - 🥇 **Multi-Modal Pre-trained Student**: 이미지-텍스트 매칭이 이미 사전 학습된 MobileCLIP2-S0 (11.4M Vision / 63.4M Text)
-- 🎓 **Dual Teacher Distillation**: SigLIP 2 Giant + MetaCLIP 2 Worldwide (H/14)
+- 🎓 **Dual Teacher Distillation**: SigLIP 2 Giant + PE-Core-bigG-14-448
 - ⚡ **Mobile-first**: XR2 Gen 2 기준 Image 9.1ms / Text 3.5ms 실측
 - 🔧 **최신 기술**: Mixed Precision, EMA, Gradient Clipping, torch.compile
 
@@ -28,8 +28,8 @@ Apple의 **MobileCLIP2-S0** (이미지+텍스트 사전 학습 완성형 모델)
 ┌─────────────────────────────────────────────────────────┐
 │                    Teacher Models                        │
 │  ┌─────────────────────┐  ┌─────────────────────────┐  │
-│  │   SigLIP 2 Giant    │  │ MetaCLIP 2 Worldwide H14 │  │
-│  │   (7.5GB, 60%)      │  │   (~7.44GB, 40%)         │  │
+│  │   SigLIP 2 Giant    │  │ PE-Core bigG/14-448      │  │
+│  │   (~6.97GB, 50%)    │  │   (~9.01GB, 50%)         │  │
 │  └──────────┬──────────┘  └───────────┬─────────────┘  │
 │             │     Knowledge Distillation     │          │
 │             └─────────────┬─────────────────┘          │
@@ -57,15 +57,15 @@ Apple의 **MobileCLIP2-S0** (이미지+텍스트 사전 학습 완성형 모델)
 학생 모델에게 **정밀한 텍스트-이미지 매칭 능력**을 전수해 줄 첫 번째 전문가 모델입니다.
 * **선택 이유:** SigLIP 2는 현재 업계 최고 수준(SOTA)의 비전-언어 모델 중 하나로, 이미지의 미세한 디테일과 복잡한 언어적 문맥을 연결하는 데 탁월한 성능을 보입니다. 작은 학생 모델이 놓치기 쉬운 세밀한 특징들을 스스로 찾아내도록 지도합니다.
 
-#### 🌐 3. 두 번째 선생님: MetaCLIP 2 Worldwide
-학생 모델에게 **방대한 글로벌 상식**을 전수해 줄 두 번째 전문가 모델입니다.
-* **선택 이유:** 인터넷 상의 어마어마한 양의 전 세계(Worldwide) 데이터를 바탕으로 학습되었기 때문에, 현존하는 가장 넓은 범용 시각 지식을 보유하고 있습니다. 학생 모델이 다양한 환경이나 낯선 이미지 패턴에서도 당황하지 않고 유연하게 대응할 수 있도록 시야를 넓혀줍니다.
+#### 🌐 3. 두 번째 선생님: PE-Core-bigG-14-448
+학생 모델에게 **강한 전역 시각 인식/검색 prior**를 전수해 줄 두 번째 전문가 모델입니다.
+* **선택 이유:** Meta FAIR의 최신 Perception Encoder 계열 중 고성능 모델로, 이미지-텍스트 정렬(검색) 벤치에서 강한 성능을 보여줍니다. 현재 기본 조합은 라이선스 리스크를 낮추기 위해 Apache-2.0 계열 teacher로 구성했습니다.
 
 ---
 
 #### ⚖️ 왜 두 개의 선생님 모델(Dual Teacher)을 사용하나요?
 단일 선생님 모델에만 의존할 경우 해당 모델이 가진 '특정 학습 편향'까지 학생이 그대로 물려받을 위험이 있습니다. 
-마치 전공 분야가 다른 두 명의 명문대 교수님에게 수업을 듣는 것처럼, **정밀한 묘사에 강한 SigLIP 2**와 **방대한 일반 상식에 강한 MetaCLIP 2**를 결합하면 각각의 장점만을 안전하게 취할 수 있습니다. 두 선생님의 예측값(Soft-targets)을 6:4 비율로 융합하여 학생에게 전달함으로써, 결과적으로 학생 모델은 물리적인 크기는 작으면서도 다방면으로 뛰어난 시각 지능을 갖추게 됩니다.
+마치 전공 분야가 다른 두 명의 명문대 교수님에게 수업을 듣는 것처럼, **정밀한 텍스트-이미지 정렬에 강한 SigLIP 2**와 **강한 전역 인식 성능의 PE-Core**를 결합하면 각각의 장점만을 안전하게 취할 수 있습니다. 기본 비율은 5:5로 두고(재현성), 필요 시 Adaptive Teacher Weight로 배치별 동적 가중합을 적용해 학생에게 전달합니다.
 
 ## 🚀 Quick Start
 
@@ -142,7 +142,7 @@ data:
 처음 실행은 아래 2단계로 진행하면 됩니다.
 
 1. `run_train.py` 전에 Teacher feature를 1회 추출
-이유:
+*이유:
 - Teacher를 학습 루프에서 매번 돌리지 않아서 VRAM/학습시간을 크게 줄입니다.
 - 이후 실험을 반복해도 같은 Teacher feature를 재사용할 수 있습니다.
 
@@ -317,8 +317,9 @@ python -c "import qai_hub as hub; d=hub.Device('XR2 Gen 2 (Proxy)'); m=hub.get_j
 
 - [MobileCLIP2](https://github.com/apple/ml-mobileclip) - Apple ML Research (Student)
 - [SigLIP 2](https://arxiv.org/abs/2502.14786) - Google DeepMind (Teacher 1)
-- [MetaCLIP 2](https://github.com/facebookresearch/MetaCLIP) - Meta AI (Teacher 2)
-- [Meta CLIP 2 Collection](https://huggingface.co/collections/facebook/meta-clip-2) - Hugging Face
+- [Perception Encoder (PE)](https://arxiv.org/abs/2504.13181) - Meta FAIR (Teacher 2 paper)
+- [Perception Models (PE)](https://github.com/facebookresearch/perception_models) - Meta FAIR (Teacher 2)
+- [PE-Core-G14-448](https://huggingface.co/facebook/PE-Core-G14-448) - Hugging Face
 - [TinyCLIP](https://arxiv.org/abs/2309.12314) - Affinity Distillation
 - [OpenCLIP](https://github.com/mlfoundations/open_clip) - Model Loading Framework
 
@@ -333,7 +334,7 @@ This project is licensed under the MIT License.
 | **프로젝트 코드** | MIT | 본 저장소 코드 |
 | **MobileCLIP2 (Student)** | Code: MIT / Weights: Apple ML Research TOU | [모델 카드 확인](https://huggingface.co/apple/MobileCLIP2-S0) |
 | **SigLIP 2 Giant (Teacher 1)** | Apache 2.0 | [모델 카드 확인](https://huggingface.co/timm/ViT-gopt-16-SigLIP2-256) |
-| **MetaCLIP 2 Worldwide (Teacher 2)** | CC-BY-NC-4.0 | 비상업 조항 포함. [모델 카드 확인](https://huggingface.co/facebook/metaclip-2-worldwide-huge-quickgelu) |
+| **PE-Core-bigG-14-448 (Teacher 2)** | Apache 2.0 | [모델 카드 확인](https://huggingface.co/facebook/PE-Core-G14-448), [PE 저장소](https://github.com/facebookresearch/perception_models) |
 | **OpenCLIP 프레임워크** | MIT | [저장소](https://github.com/mlfoundations/open_clip) |
 
 > ⚠️ 모델 가중치 재배포/상업 사용 전 각 모델 카드의 라이선스 원문을 반드시 재확인하세요.
@@ -342,5 +343,5 @@ This project is licensed under the MIT License.
 
 - Apple for MobileCLIP2
 - Google DeepMind for SigLIP 2
-- Meta AI for MetaCLIP 2
+- Meta FAIR for Perception Encoder (PE)
 - LPCVC 2026 Organizers

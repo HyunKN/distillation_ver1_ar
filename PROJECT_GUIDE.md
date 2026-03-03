@@ -60,12 +60,12 @@
 
 기본 `config.yaml` 기준:
 
-- Teacher 1: `ViT-gopt-16-SigLIP2-256` + `webli` (가중치 0.6)
-- Teacher 2: `ViT-H-14-worldwide-quickgelu` + `metaclip2_worldwide` (가중치 0.4, OpenCLIP 체크포인트 약 7.44GB)
+- Teacher 1: `ViT-gopt-16-SigLIP2-256` + `webli` (가중치 0.5)
+- Teacher 2: `PE-Core-bigG-14-448` + `meta` (가중치 0.5, 체크포인트 약 9.01GB)
 
 중요:
 
-- 현재 기본은 MetaCLIP 2 Worldwide(H/14) 조합입니다.
+- 현재 기본은 SigLIP2 + PE-Core-bigG-14-448 조합입니다.
 - 어떤 모델을 받는지는 Hugging Face 링크 문자열 자체보다 `open_clip`의 pretrained registry 해석이 기준입니다.
 
 ---
@@ -698,10 +698,10 @@ loss 조합 위치:
 
 - Teacher 1 설정: `ViT-gopt-16-SigLIP2-256` + `webli`
   - 실제 hf_hub: `timm/ViT-gopt-16-SigLIP2-256`
-- Teacher 2 설정: `ViT-H-14-worldwide-quickgelu` + `metaclip2_worldwide`
-  - 실제 hf_hub: `timm/vit_huge_patch14_clip_224.metaclip2_worldwide`
-  - 참고 용량: `open_clip_model.safetensors` 약 7.44GB, `model.safetensors` 약 2.53GB (모델 카드 파일 목록 기준)
-  - 파일 목록 링크: https://huggingface.co/timm/vit_huge_patch14_clip_224.metaclip2_worldwide/tree/main , https://huggingface.co/facebook/metaclip-2-worldwide-huge-quickgelu/tree/main
+- Teacher 2 설정: `PE-Core-bigG-14-448` + `meta`
+  - 실제 hf_hub: `timm/PE-Core-bigG-14-448` (OpenCLIP 매핑)
+  - 참고 용량: `PE-Core-G14-448.pt` 약 9.01GB (HF 파일 목록 기준)
+  - 파일 목록 링크: https://huggingface.co/timm/PE-Core-bigG-14-448/tree/main , https://huggingface.co/facebook/PE-Core-G14-448/tree/main
 
 ### 14.2 모델 링크 + 라이선스/저작권
 
@@ -709,13 +709,13 @@ loss 조합 위치:
 |---|---|---|---|---|
 | Student 모델 | Apple MobileCLIP2-S0 | https://github.com/apple/ml-mobileclip | https://huggingface.co/apple/MobileCLIP2-S0 | HF 표기: `apple-amlr`. Apple 저장소에는 `Code: MIT`, `ML models: Apple ML Research Model TOU`로 명시됨 |
 | Teacher 1 | SigLIP2 Giant 계열 (`ViT-gopt-16-SigLIP2-256`) | https://github.com/google-research/big_vision | https://huggingface.co/timm/ViT-gopt-16-SigLIP2-256 (또는 https://huggingface.co/google/siglip2-giant-opt-patch16-256) | HF 표기: `apache-2.0` |
-| Teacher 2 | MetaCLIP 2 Worldwide H/14 (`ViT-H-14-worldwide-quickgelu`) | https://github.com/facebookresearch/MetaCLIP | https://huggingface.co/timm/vit_huge_patch14_clip_224.metaclip2_worldwide (OpenCLIP/timm), https://huggingface.co/facebook/metaclip-2-worldwide-huge-quickgelu (facebook), https://huggingface.co/collections/facebook/meta-clip-2 | HF 모델 카드 표기 기준 `cc-by-nc-4.0` (비상업 조항 포함, 사용 전 재확인 권장) |
+| Teacher 2 | PE-Core bigG/14 (`PE-Core-bigG-14-448`) | https://github.com/facebookresearch/perception_models | https://huggingface.co/timm/PE-Core-bigG-14-448 (OpenCLIP/timm), https://huggingface.co/facebook/PE-Core-G14-448 (facebook) | HF 모델 카드 표기 기준 `apache-2.0` |
 | 로딩 프레임워크 | OpenCLIP | https://github.com/mlfoundations/open_clip | (모델 허브는 각 모델 카드 참조) | OpenCLIP 저장소 라이선스: MIT |
 
 권장 표기(실무):
 
 - 모델 재배포/상업 사용 전, 각 모델 카드의 라이선스와 원문 LICENSE 파일을 반드시 재확인
-- 특히 `cc-by-nc-4.0`은 상업적 이용이 제한될 수 있으므로 대회/프로덕션 용도 구분 필요
+- PE-Core 계열은 Apache-2.0이지만, 실제 배포 전 최종 모델 카드/라이선스 파일 재확인 권장
 - `apple-amlr`/`Apple ML Research Model TOU`도 사용 범위 조건을 먼저 확인해야 함
 
 ### 14.3 논문 출처(실제 링크)
@@ -729,8 +729,7 @@ loss 조합 위치:
 | Teacher 계열(최신) | SigLIP 2: Multilingual Vision-Language Encoders... | https://arxiv.org/abs/2502.14786 |
 | Student 기반 모델 | MobileCLIP: Fast Image-Text Models through Multi-Modal Reinforced Training | https://arxiv.org/abs/2311.17049 |
 | Student 최신 버전 | MobileCLIP2: Improving Multi-Modal Reinforced Training | https://openreview.net/forum?id=WeF9zolng8 |
-| MetaCLIP 계열 | Demystifying CLIP Data | https://arxiv.org/abs/2309.16671 |
-| MetaCLIP 2 계열 | Meta CLIP 2: A Worldwide Scaling Recipe | https://arxiv.org/abs/2507.22062 |
+| Perception Encoder (PE) 계열 | Perception Encoder: The best visual embeddings are not at the output layer | https://arxiv.org/abs/2504.13181 |
 | Affinity distillation 계열 | TinyCLIP: CLIP Distillation via Affinity Mimicking and Weight Inheritance | https://arxiv.org/abs/2309.12314 |
 | Hard negative 아이디어 참고 | BLIP: Bootstrapping Language-Image Pre-training... | https://arxiv.org/abs/2201.12086 |
 
@@ -748,7 +747,7 @@ loss 조합 위치:
 This project uses third-party models and implementations:
 - MobileCLIP2 (Apple): Code MIT, model weights under Apple ML Research Model TOU (see model card/license).
 - SigLIP2 checkpoints: Apache-2.0 (see Hugging Face model card).
-- MetaCLIP 2 Worldwide H/14 checkpoint used via OpenCLIP/timm: CC-BY-NC-4.0.
+- PE-Core bigG/14 checkpoint used via OpenCLIP/timm: Apache-2.0.
 - OpenCLIP framework: MIT.
 
 Please verify each upstream license for your intended use (especially commercial usage).

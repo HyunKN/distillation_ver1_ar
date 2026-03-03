@@ -73,7 +73,7 @@
 기존 2023~2024년 방식(단순 Contrastive Loss, ALBEF/BLIP 등)을 넘어, 최근 학계(2025~2026)에서 집중하고 있는 **"어떻게 거대 VLM의 지식을 작은 학생 모델에 손실 없이(효율적으로) 구겨 넣을 것인가"**에 대한 최신 트렌드를 현재 우리 코드에 접목할 수 있도록 정리했습니다.
 
 1. **초대규모 배치를 위한 Offline Feature Extraction (사전 임베딩 추출)**  
-   - **원리**: A100의 넉넉한 VRAM을 100% 활용하기 위해, 부피가 큰 Teacher 모델들(SigLIP Giant, MetaCLIP H 등)을 메모리에 상주시키지 않고 사전에 정답(Embedding Logit)만 `.pt` 파일로 추출해둡니다.  
+   - **원리**: A100의 넉넉한 VRAM을 100% 활용하기 위해, 부피가 큰 Teacher 모델들(SigLIP Giant, PE-Core bigG/14 등)을 메모리에 상주시키지 않고 사전에 정답(Embedding Logit)만 `.pt` 파일로 추출해둡니다.  
    - **기대효과**: VRAM을 오로지 학생 모델과 Batch Size에 전부 몰아줄 수 있게 됩니다. Dual Teacher 학습 과정에서도 Contrastive Loss의 핵심인 '초거대 배치 사이즈(Macro Batch)'를 달성하여 검색(Retrieval) 성능의 한계를 돌파하는 프레임워크 뼈대입니다.
 
 2. **DCLIP: Cross-Modal Transformer Distillation (2025 최신 검색 목적 증류)**  
@@ -93,8 +93,8 @@
 
 4. **AMMKD: Adaptive Multimodal Multi-teacher Distillation (2025 듀얼 티처 종결자)**  
    - **관련 연구**: AMMKD (2025. 08 출판) / TinyCLIP (2023)의 진화형
-   - **원리**: 우리 프로젝트의 핵심인 **Dual Teacher 구조에 직접적으로 꽂히는 최신 논문**입니다. 고정된 비율(0.6 : 0.4)로 Teacher를 섞는 것이 아니라, 데이터 쌍마다 어떤 Teacher의 지식이 더 정답에 가까운지 네트워크가 동적으로 가중치(Adaptive Weight)를 조절하고, 데이터 간의 관계성(Affinity Matrix)을 증류합니다.
-   - **목적/이득**: SigLIP Giant가 잘하는 분야와 MetaCLIP이 잘하는 분야를 학생 모델이 스위칭해가며 뷔페처럼 떠먹게 만들어, 듀얼 티처의 잠재력을 200% 폭발시킵니다.
+   - **원리**: 우리 프로젝트의 핵심인 **Dual Teacher 구조에 직접적으로 꽂히는 최신 논문**입니다. 고정된 비율(0.5 : 0.5)로 Teacher를 섞는 것이 아니라, 데이터 쌍마다 어떤 Teacher의 지식이 더 정답에 가까운지 네트워크가 동적으로 가중치(Adaptive Weight)를 조절하고, 데이터 간의 관계성(Affinity Matrix)를 증류합니다.
+   - **목적/이득**: SigLIP Giant가 잘하는 분야와 PE-Core bigG/14가 잘하는 분야를 학생 모델이 스위칭해가며 뷔페처럼 떠먹게 만들어, 듀얼 티처의 잠재력을 극대화합니다.
    - **참고 수치**: Multi-teacher 환경에서 고정 가중치 대비 Adaptive 방식이 **+1~3%p** 우위 보고 (TinyCLIP 계열 벤치마크 기준).
 
 ---
@@ -141,13 +141,13 @@
 - 기대효과: `R@1 +0.2 ~ +0.8%p` (환경 의존)
 
 3. **Step 2: Adaptive Teacher Weight (Offline 호환 방식)**
-- 목표: 고정 0.6/0.4의 한계 해소
+- 목표: 고정 0.5/0.5의 한계 해소
 - 작업: teacher별 배치 품질 점수(`pos_sim - neg_sim margin`)로 동적 가중치 계산
 - 작업: `w = softmax(margin/tau)` + `w_min` 바닥값 적용
 - 기대효과: `R@1 +0.5 ~ +1.5%p` (환경 의존)
 
 쉬운 설명:
-1. 기존 방식은 모든 배치에서 항상 `0.6 : 0.4`로 teacher를 섞습니다.
+1. 기존 방식은 모든 배치에서 항상 `0.5 : 0.5`로 teacher를 섞습니다.
 2. Adaptive 방식은 배치가 바뀔 때마다 "이번 배치에서 누가 더 잘 가르쳤는지"를 계산합니다.
 3. 더 잘 가르친 teacher 비중을 높이고, 덜 맞는 teacher 비중을 낮춰서 distill loss를 만듭니다.
 4. 즉, teacher 1명만 고르는 것이 아니라 두 teacher를 상황에 맞게 비율로 섞습니다.
@@ -222,7 +222,7 @@
 | Exp-0 | Baseline (현재 코드) | 기준선 확립 | R@K, VRAM, time/epoch |
 | Exp-1 | Exp-0 + Offline 운영 규칙 고정(추출 OFF/학습 ON) | 재현성 + 안정화 | 재실행 간 성능 분산 감소 |
 | Exp-2 | Exp-1 + Temperature Scheduling | 기준선 안정화 | 초반 수렴 안정성, 후반 R@1 |
-| Exp-3 | Exp-2 + Adaptive Teacher Weight | 듀얼 teacher 효율화 | 고정 0.6/0.4 대비 개선폭 |
+| Exp-3 | Exp-2 + Adaptive Teacher Weight | 듀얼 teacher 효율화 | 고정 0.5/0.5 대비 개선폭 |
 | Exp-4 | Exp-3 + False-Negative 보정 | hard case 일반화 | R@1/R@5 개선, 오탐 감소 |
 | Exp-5 | Exp-4 + Hard-Negative/Text-Text 재튜닝 | loss 밸런싱 최적화 | distill/main loss 균형 |
 | Exp-6 | Exp-5 + EMA warm-start | 안정성 향상 | val 곡선 진동폭 감소 |
@@ -239,7 +239,7 @@
 ### 8.1 Adaptive Teacher Weight A/B 실행 절차 (필수)
 
 비교 목적:
-1. 고정 teacher 비율(`0.6/0.4`) 대비 adaptive 동적 가중합이 실제로 이득인지 확인
+1. 고정 teacher 비율(`0.5/0.5`) 대비 adaptive 동적 가중합이 실제로 이득인지 확인
 2. "느낌"이 아니라 동일 조건 수치로 채택 여부 결정
 
 실행 방법:
@@ -274,7 +274,7 @@
 
 2. **두 번째 실행(성능 모드): Step 2까지 적용**
 - 적용: 위 설정 + Adaptive Teacher Weight(`adaptive_teacher_weight=true`)
-- 목적: 고정 0.6/0.4 대비 실제 개선폭 확인
+- 목적: 고정 0.5/0.5 대비 실제 개선폭 확인
 
 3. **처음부터 켜지 말 것**
 - False-Negative 보정, 연구 트랙(CFD/DCLIP/PAND/LAid)은 첫 A100 실행에서 제외
@@ -322,13 +322,27 @@
 2. 실험은 한 번에 한 가지 변화만 적용한다.
 3. 모든 의사결정은 `R@K + 시간 + VRAM + 변동폭` 4개 지표로 한다.
 
+### 10.1 현재 기본 Teacher 조합 출처 (2026-03 기준)
+1. Teacher 1: `ViT-gopt-16-SigLIP2-256` (`webli`)
+   - GitHub: https://github.com/google-research/big_vision
+   - Hugging Face: https://huggingface.co/timm/ViT-gopt-16-SigLIP2-256
+   - 라이선스(모델 카드 표기): Apache-2.0
+2. Teacher 2: `PE-Core-bigG-14-448` (`meta`)
+   - GitHub: https://github.com/facebookresearch/perception_models
+   - Hugging Face: https://huggingface.co/facebook/PE-Core-G14-448
+   - OpenCLIP 매핑: https://huggingface.co/timm/PE-Core-bigG-14-448
+   - 라이선스(모델 카드 표기): Apache-2.0
+3. 로딩 프레임워크: OpenCLIP
+   - GitHub: https://github.com/mlfoundations/open_clip
+   - 라이선스: MIT
+
 ---
 
 ## 11) 변경 이력
 
 ### 2026-03-01: Offline Feature Extraction 구현 (Method B)
 
-Teacher 모델(SigLIP Giant, MetaCLIP H)을 VRAM에 상주시키지 않고, 사전 추출된 임베딩을 DataLoader에서 공급하는 구조를 구현했습니다.
+Teacher 모델(SigLIP Giant, PE-Core bigG/14)을 VRAM에 상주시키지 않고, 사전 추출된 임베딩을 DataLoader에서 공급하는 구조를 구현했습니다.
 
 **변경된 파일:**
 

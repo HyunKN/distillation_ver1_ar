@@ -16,20 +16,21 @@ device: cuda
 distill:
   use_teacher: true
   
-  # Dual Teacher Setup for A100 (SigLIP 2 Giant + MetaCLIP 2 Worldwide H/14)
+  # Dual Teacher Setup for A100 (SigLIP 2 Giant + PE-Core-bigG-14-448)
+  # 기본 weight는 0.5/0.5로 고정(재현성 baseline). 필요 시 adaptive_teacher_weight=true로 배치별 동적 가중합 사용.
   teachers:
     # Teacher 1: Google SigLIP 2 Giant (Efficiency & Alignment)
     # Model name 'ViT-gopt-16-SigLIP2-256' requires open_clip >= 2.29
     - name: ViT-gopt-16-SigLIP2-256
       pretrained: webli
-      weight: 0.6
+      weight: 0.5
       input_size: 256
       
-    # Teacher 2: MetaCLIP 2 Worldwide H/14 (strong multilingual & retrieval prior)
-    - name: ViT-H-14-worldwide-quickgelu
-      pretrained: metaclip2_worldwide
-      weight: 0.4
-      input_size: 224
+    # Teacher 2: Meta FAIR PE-Core bigG/14 (strong retrieval & perception prior)
+    - name: PE-Core-bigG-14-448
+      pretrained: meta
+      weight: 0.5
+      input_size: 448
       
   # Distillation strategy settings
   distill_margin_thr: 0.2          # selective distill threshold
