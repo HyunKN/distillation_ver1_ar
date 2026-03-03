@@ -16,6 +16,12 @@ Apple의 **MobileCLIP2-S0** (이미지+텍스트 사전 학습 완성형 모델)
 - ⚡ **Mobile-first**: XR2 Gen 2 기준 Image 9.1ms / Text 3.5ms 실측
 - 🔧 **최신 기술**: Mixed Precision, EMA, Gradient Clipping, torch.compile
 
+## 📚 문서 역할 분담
+
+- `README.md`: 프로젝트 흐름, 핵심 기술, 실행 방법, 설정값 조작(실행 중심)
+- `PROJECT_GUIDE.md`: 코드/알고리즘/아키텍처/라이선스/논문 근거(심화 설명)
+- 원칙: 둘 다 출처를 명시하며, README는 요약/실행 관점으로 유지합니다.
+
 ## 🏗️ Architecture
 
 ```
@@ -98,12 +104,15 @@ python scripts\preprocess\parse_lpcvc_sources.py --data_root dataset --out_dir d
 
 #### 📊 내 데이터셋 구조 및 비율
 
-**[총 30만장]**
+**[이미지 기준(중복 제거)]**
 - **coco:** 123,287장 (`train2017` 118,287 + `val2017` 5,000)
-- **flickr30k:** 63,566장
+- **flickr30k:** 31,783장
 - **open_images:** 125,436장
 - **wit:** 2,710장
-- **합계:** 314,999장 (중복 1벌을 제외한 실질 이미지는 대략 **283,216장** 수준)
+- **합계:** **283,216장**
+
+참고:
+- JSONL의 `train/val` 행 수는 "이미지 수"와 다를 수 있습니다(한 이미지에 여러 캡션이 붙기 때문).
 
 **[비율 (중복 제거 가정 총 283,216장 기준)]**
 - **open_images:** 125,436장 (44.29%)
@@ -128,11 +137,77 @@ data:
 
 참고: 전처리 스크립트는 `scripts/preprocess/` 폴더로 분리되어 있습니다.
 
+### 2.5 Offline Teacher Feature Extraction (권장)
+
+처음 실행은 아래 2단계로 진행하면 됩니다.
+
+1. `run_train.py` 전에 Teacher feature를 1회 추출
+이유:
+- Teacher를 학습 루프에서 매번 돌리지 않아서 VRAM/학습시간을 크게 줄입니다.
+- 이후 실험을 반복해도 같은 Teacher feature를 재사용할 수 있습니다.
+
+명령어:
+```bash
+# Windows CMD
+python scripts\extract_features.py --config config.yaml --out_dir features --override data.train_augment=false
+
+# Linux/macOS
+python scripts/extract_features.py --config config.yaml --out_dir features --override data.train_augment=false
+```
+
+추출 후 만들어져야 하는 파일(예):
+- `features/teacher_0_train.pt`
+- `features/teacher_1_train.pt`
+- `features/teacher_0_val.pt`
+- `features/teacher_1_val.pt`
+
+2. 생성된 feature 경로를 config에 연결한 뒤 `run_train.py` 실행
+이유:
+- 학습기가 이 경로를 보고 Teacher feature를 읽어 distillation을 수행합니다.
+
+`config.yaml` 설정:
+```yaml
+distill:
+  offline_feature_dir: features
+```
+
+학습 실행:
+```bash
+python run_train.py --config config.yaml
+```
+
+실행 중 확인 포인트:
+1. feature 추출 로그에 `Effective data.train_augment: False`가 출력되는지
+2. 학습 로그에 `[Train] Offline mode — Teacher NOT loaded.`가 출력되는지
+
 ### 3. Training
 
 ```bash
 python run_train.py --config config.yaml
 ```
+
+설정값을 세밀하게 바꿔 실행하려면 `--override key=value`를 여러 번 사용합니다.
+
+```bash
+# 예시 1) 스모크 테스트 (빠른 동작 확인)
+python run_train.py --config config.yaml --override train.epochs=1 --override data.batch_size=32
+
+# 예시 2) 학습률/EMA/Distill 강도 조정
+python run_train.py --config config.yaml --override train.lr=1e-4 --override train.use_ema=true --override loss.w_distill_affinity=0.3
+
+# 예시 3) Teacher OFF로 파이프라인 검증
+python run_train.py --config config.yaml --override distill.use_teacher=false
+```
+
+설정 조작 기준:
+- 정적 기준값은 `config.yaml`에 기록합니다.
+- 실험 파라미터는 `--override`로 바꾸고 실행 로그에 남깁니다.
+- 재현이 필요한 실험은 사용한 override 목록을 별도 메모/커밋 메시지에 저장합니다.
+
+학습 전 확인:
+1. `distill.offline_feature_dir`가 실제 `.pt` feature 경로와 일치하는지
+2. `data.mode`/`train_jsonl`/`val_jsonl`이 현재 데이터셋 구조와 일치하는지
+3. 로그에 의도한 override가 출력되는지 (`[Config] Overrides:`)
 
 ### 4. Evaluation
 
@@ -226,12 +301,17 @@ python -c "import qai_hub as hub; d=hub.Device('XR2 Gen 2 (Proxy)'); m=hub.get_j
 | Text Params | - | 63.4 M | 텍스트 인코더 모델 파라미터 수 |
 | Image Size (ONNX) | <50MB | 43.7 MB | 비전 인코더 모델 용량 |
 
+측정 출처:
+- Image/Text latency는 Qualcomm AI Hub `XR2 Gen 2 (Proxy)` 프로파일 결과(내부 실험 로그) 기준입니다.
+- 모델 파라미터/용량은 모델 카드 및 ONNX export 산출물 기준입니다.
+
 ## 🔬 Technical Details
 
 자세한 기술 설명은 [PROJECT_GUIDE.md](./PROJECT_GUIDE.md)를 참조하세요:
 - 모델 아키텍처 상세
 - 학습 알고리즘 설명
 - 적용된 기술 및 논문 출처
+- 코드 단위 동작 설명 및 라이선스 검토
 
 ## 📚 References
 

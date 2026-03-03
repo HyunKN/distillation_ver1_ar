@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import hashlib
 from collections import defaultdict
 from typing import Any, Dict, List, Tuple
 
@@ -64,6 +65,7 @@ class JsonlRetrievalDataset(Dataset):
         self.tokenizer = tokenizer
         self.max_caps_per_image = max(1, int(max_caps_per_image))
         self.is_train = is_train
+        self._forced_caption_indices = None
         
         # Use augmentation only for training
         self.tf = _img_transform_train(augment) if is_train else _img_transform_eval()
@@ -97,6 +99,15 @@ class JsonlRetrievalDataset(Dataset):
                     for ann_id, cap in enumerate(caps):
                         self.samples.append((img_rel, image_id, cap, ann_id))
 
+    def set_forced_caption_indices(self, caption_indices):
+        """Force deterministic caption selection per sample index (offline distillation mode)."""
+        if caption_indices is None:
+            self._forced_caption_indices = None
+            return
+        if torch.is_tensor(caption_indices):
+            caption_indices = caption_indices.tolist()
+        self._forced_caption_indices = [int(x) for x in caption_indices]
+
     def __len__(self) -> int:
         return len(self.samples)
 
@@ -105,15 +116,30 @@ class JsonlRetrievalDataset(Dataset):
 
         if self.is_train:
             img_rel, image_id, caps = item
+            forced = self._forced_caption_indices
 
-            if len(caps) > 1:
-                pool = caps if self.max_caps_per_image >= len(caps) else random.sample(caps, k=self.max_caps_per_image)
-                cap = random.choice(pool)
+            if forced is not None and idx < len(forced):
+                cap_idx = int(forced[idx])
+                if cap_idx < 0:
+                    cap_idx = 0
+                if cap_idx >= len(caps):
+                    cap_idx = len(caps) - 1
+                cap = caps[cap_idx]
             else:
-                cap = caps[0]
+                if len(caps) > 1:
+                    if self.max_caps_per_image >= len(caps):
+                        pool_idx = list(range(len(caps)))
+                    else:
+                        pool_idx = random.sample(range(len(caps)), k=self.max_caps_per_image)
+                    cap_idx = random.choice(pool_idx)
+                    cap = caps[cap_idx]
+                else:
+                    cap_idx = 0
+                    cap = caps[0]
             ann_id = None
         else:
             img_rel, image_id, cap, ann_id = item
+            cap_idx = None
             
         img_path = os.path.join(self.image_root, img_rel)
         image = Image.open(img_path).convert("RGB")
@@ -133,6 +159,7 @@ class JsonlRetrievalDataset(Dataset):
             "image_id": image_id,
             "ann_id": ann_id,
             "caption": cap,
+            "caption_idx": cap_idx,
             "img_rel": img_rel,
         }
         # 기존: return x, input_ids, cap
@@ -163,6 +190,7 @@ class CocoCaptionsRetrievalDataset(Dataset):
         self.tokenizer = tokenizer
         self.max_caps_per_image = max(1, int(max_caps_per_image))
         self.is_train = is_train
+        self._forced_caption_indices = None
         
         # Use augmentation only for training
         self.tf = _img_transform_train(augment) if is_train else _img_transform_eval()
@@ -207,6 +235,15 @@ class CocoCaptionsRetrievalDataset(Dataset):
                 img_rel = f"{self.split}/{file_name}"
                 self.samples.append((img_rel, int(image_id), caption, int(ann_id) if ann_id is not None else None))
 
+    def set_forced_caption_indices(self, caption_indices):
+        """Force deterministic caption selection per sample index (offline distillation mode)."""
+        if caption_indices is None:
+            self._forced_caption_indices = None
+            return
+        if torch.is_tensor(caption_indices):
+            caption_indices = caption_indices.tolist()
+        self._forced_caption_indices = [int(x) for x in caption_indices]
+
     def __len__(self) -> int:
         return len(self.samples)
 
@@ -215,16 +252,31 @@ class CocoCaptionsRetrievalDataset(Dataset):
 
         if self.is_train:
             img_rel, image_id, caps = item
+            forced = self._forced_caption_indices
 
-            if self.is_train and len(caps) > 1:
-                pool = caps if self.max_caps_per_image >= len(caps) else random.sample(caps, k=self.max_caps_per_image)
-                cap = random.choice(pool)
+            if forced is not None and idx < len(forced):
+                cap_idx = int(forced[idx])
+                if cap_idx < 0:
+                    cap_idx = 0
+                if cap_idx >= len(caps):
+                    cap_idx = len(caps) - 1
+                cap = caps[cap_idx]
             else:
-                cap = caps[0]
+                if self.is_train and len(caps) > 1:
+                    if self.max_caps_per_image >= len(caps):
+                        pool_idx = list(range(len(caps)))
+                    else:
+                        pool_idx = random.sample(range(len(caps)), k=self.max_caps_per_image)
+                    cap_idx = random.choice(pool_idx)
+                    cap = caps[cap_idx]
+                else:
+                    cap_idx = 0
+                    cap = caps[0]
 
             ann_id = None
         else:
             img_rel, image_id, cap, ann_id = item
+            cap_idx = None
 
         img_path = os.path.join(self.coco_root, img_rel)
         image = Image.open(img_path).convert("RGB")
@@ -243,9 +295,142 @@ class CocoCaptionsRetrievalDataset(Dataset):
             "image_id": image_id,   # train이면 None일 수 있음
             "ann_id": ann_id,
             "caption": cap,
+            "caption_idx": cap_idx,
             "img_rel": img_rel,
         }
         return x, input_ids, meta
+
+
+class OfflineFeatureDataset(Dataset):
+    """
+    Wrapper that loads pre-extracted Teacher embeddings alongside the base dataset.
+    """
+    def __init__(self, base_dataset: Dataset, feature_dir: str, split: str = "train"):
+        self.base_dataset = base_dataset
+        self.feature_dir = feature_dir
+        self.split = split
+
+        # Fingerprint current dataset order/content to detect stale or shuffled offline features.
+        self.current_dataset_fingerprint = None
+        if hasattr(self.base_dataset, "samples"):
+            hasher = hashlib.sha1()
+            for s in self.base_dataset.samples:
+                # train: (img_rel, image_id, caps), eval: (img_rel, image_id, caption, ann_id)
+                try:
+                    img_rel = str(s[0])
+                    image_id = int(s[1])
+                except Exception:
+                    img_rel = str(s[0]) if len(s) > 0 else ""
+                    image_id = -1
+                hasher.update(f"{image_id}|{img_rel}\n".encode("utf-8"))
+            self.current_dataset_fingerprint = hasher.hexdigest()
+        
+        # Load all teacher features
+        self.teacher_features = []
+        t_idx = 0
+        while True:
+            path = os.path.join(feature_dir, f"teacher_{t_idx}_{split}.pt")
+            if not os.path.exists(path):
+                break
+            data = torch.load(path, map_location="cpu", weights_only=True)
+            self.teacher_features.append(data)
+            print(f"[Offline] Loaded {path} | img: {data['img_embs'].shape}, txt: {data['txt_embs'].shape}")
+            t_idx += 1
+        
+        if len(self.teacher_features) == 0:
+            raise FileNotFoundError(
+                f"[Offline] No teacher feature files found in {feature_dir} for split '{split}'. "
+                f"Run 'python scripts/extract_features.py' first."
+            )
+        
+        # Validate size match
+        expected_len = len(self.base_dataset)
+        shared_caption_indices = None
+        shared_fingerprint = None
+        for t_idx, tf in enumerate(self.teacher_features):
+            actual_len = tf["img_embs"].shape[0]
+            if actual_len != expected_len:
+                raise ValueError(
+                    f"[Offline] Size mismatch: dataset has {expected_len} samples "
+                    f"but teacher_{t_idx}_{split}.pt has {actual_len}. "
+                    f"Re-run extract_features.py."
+                )
+            if tf["img_embs"].shape != tf["txt_embs"].shape:
+                raise ValueError(
+                    f"[Offline] Dimension mismatch in teacher_{t_idx}_{split}.pt: "
+                    f"img_embs={tf['img_embs'].shape}, txt_embs={tf['txt_embs'].shape}"
+                )
+            if "sample_count" in tf and int(tf["sample_count"]) != expected_len:
+                raise ValueError(
+                    f"[Offline] sample_count mismatch in teacher_{t_idx}_{split}.pt: "
+                    f"{int(tf['sample_count'])} != {expected_len}"
+                )
+            if "dataset_fingerprint" in tf:
+                fp = str(tf["dataset_fingerprint"])
+                if shared_fingerprint is None:
+                    shared_fingerprint = fp
+                elif shared_fingerprint != fp:
+                    raise ValueError(
+                        f"[Offline] dataset_fingerprint mismatch across teachers: "
+                        f"{shared_fingerprint} vs {fp}"
+                    )
+                if (
+                    self.current_dataset_fingerprint is not None
+                    and fp != self.current_dataset_fingerprint
+                ):
+                    raise ValueError(
+                        "[Offline] dataset_fingerprint mismatch between current dataset and "
+                        f"feature file teacher_{t_idx}_{split}.pt: {self.current_dataset_fingerprint} vs {fp}. "
+                        "Dataset order/content changed after extraction. Re-run scripts/extract_features.py."
+                    )
+            if "caption_indices" in tf:
+                ci = tf["caption_indices"].to(torch.long)
+                if ci.shape[0] != expected_len:
+                    raise ValueError(
+                        f"[Offline] caption_indices length mismatch in teacher_{t_idx}_{split}.pt: "
+                        f"{ci.shape[0]} != {expected_len}"
+                    )
+                if shared_caption_indices is None:
+                    shared_caption_indices = ci
+                elif not torch.equal(shared_caption_indices, ci):
+                    raise ValueError(
+                        f"[Offline] caption_indices mismatch across teachers in split '{split}'."
+                    )
+        
+        print(f"[Offline] {len(self.teacher_features)} teacher(s) loaded for '{split}' ({expected_len} samples)")
+        if shared_fingerprint is not None:
+            print(f"[Offline] dataset_fingerprint={shared_fingerprint}")
+
+        # In train split, force the same caption_idx that was used during feature extraction.
+        if split == "train" and shared_caption_indices is not None:
+            if hasattr(self.base_dataset, "set_forced_caption_indices"):
+                self.base_dataset.set_forced_caption_indices(shared_caption_indices)
+                print(f"[Offline] Forced caption indices injected for split '{split}'.")
+            else:
+                print(
+                    "[Offline] Warning: base dataset does not support forced caption indices; "
+                    "offline text distillation may be noisy."
+                )
+        elif split == "train":
+            print(
+                "[Offline] Warning: caption_indices not found in feature files. "
+                "Re-run scripts/extract_features.py to avoid caption mismatch noise."
+            )
+    
+    def __len__(self) -> int:
+        return len(self.base_dataset)
+    
+    def __getitem__(self, idx: int):
+        base_item = self.base_dataset[idx]
+        
+        teacher_embs = []
+        for tf in self.teacher_features:
+            teacher_embs.append((
+                tf["img_embs"][idx],
+                tf["txt_embs"][idx],
+            ))
+        
+        return (*base_item, teacher_embs)
 
 
 def make_datasets(cfg, tokenizer: CLIPTokenizer):
@@ -273,30 +458,48 @@ def make_datasets(cfg, tokenizer: CLIPTokenizer):
             is_train=False,
             augment=False,
         )
-        return train_ds, val_ds
-
-    # default jsonl mode
-    train_ds = JsonlRetrievalDataset(
-        image_root=str(cfg.data.get("image_root", ".")),
-        jsonl_path=str(cfg.data.get("train_jsonl", "train.jsonl")),
-        tokenizer=tokenizer,
-        max_caps_per_image=max_caps,
-        is_train=True,
-        augment=train_augment,
-    )
-    val_ds = JsonlRetrievalDataset(
-        image_root=str(cfg.data.get("image_root", ".")),
-        jsonl_path=str(cfg.data.get("val_jsonl", "val.jsonl")),
-        tokenizer=tokenizer,
-        max_caps_per_image=max_caps,
-        is_train=False,
-        augment=False,
-    )
+    else:
+        # default jsonl mode
+        train_ds = JsonlRetrievalDataset(
+            image_root=str(cfg.data.get("image_root", ".")),
+            jsonl_path=str(cfg.data.get("train_jsonl", "train.jsonl")),
+            tokenizer=tokenizer,
+            max_caps_per_image=max_caps,
+            is_train=True,
+            augment=train_augment,
+        )
+        val_ds = JsonlRetrievalDataset(
+            image_root=str(cfg.data.get("image_root", ".")),
+            jsonl_path=str(cfg.data.get("val_jsonl", "val.jsonl")),
+            tokenizer=tokenizer,
+            max_caps_per_image=max_caps,
+            is_train=False,
+            augment=False,
+        )
+    
+    distill_cfg = cfg.get("distill", {})
+    offline_feature_dir = distill_cfg.get("offline_feature_dir", None) if distill_cfg else None
+    
+    if offline_feature_dir and os.path.isdir(str(offline_feature_dir)):
+        offline_feature_dir = str(offline_feature_dir)
+        print(f"[Offline] Wrapping train dataset with pre-extracted features from: {offline_feature_dir}")
+        train_ds = OfflineFeatureDataset(train_ds, offline_feature_dir, split="train")
+    
     return train_ds, val_ds
 
 
 def collate_fn(batch):
     imgs = torch.stack([b[0] for b in batch], dim=0).float()
     toks = torch.stack([b[1] for b in batch], dim=0)
-    metas = [b[2] for b in batch]   
+    metas = [b[2] for b in batch]
+    
+    if len(batch[0]) > 3:
+        num_teachers = len(batch[0][3])
+        teacher_batch = []
+        for t_idx in range(num_teachers):
+            t_imgs = torch.stack([b[3][t_idx][0] for b in batch], dim=0)
+            t_txts = torch.stack([b[3][t_idx][1] for b in batch], dim=0)
+            teacher_batch.append((t_imgs, t_txts))
+        return imgs, toks, metas, teacher_batch
+    
     return imgs, toks, metas

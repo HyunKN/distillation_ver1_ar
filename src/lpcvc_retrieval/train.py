@@ -123,6 +123,30 @@ def _normalize_clip(img: torch.Tensor, mean: list, std: list) -> torch.Tensor:
     std_t = img.new_tensor(std).view(1, 3, 1, 1)
     return (img - mean_t) / std_t
 
+
+def _scheduled_distill_temp(
+    epoch_idx: int,
+    total_epochs: int,
+    start: float,
+    end: float,
+    schedule: str,
+) -> float:
+    """Return epoch-wise distillation temperature."""
+    schedule = str(schedule).lower()
+    if total_epochs <= 1 or abs(start - end) < 1e-12 or schedule == "constant":
+        return float(start)
+
+    progress = float(epoch_idx) / float(max(1, total_epochs - 1))  # 0.0 -> 1.0
+    if schedule == "linear":
+        alpha = progress
+    elif schedule == "cosine":
+        alpha = 0.5 * (1.0 - math.cos(math.pi * progress))
+    else:
+        # Fallback to constant if an unknown schedule is provided.
+        alpha = 0.0
+
+    return float(start + (end - start) * alpha)
+
 def train(cfg) -> str:
     device = resolve_device(cfg.get("device", "auto"))
     set_seed(int(cfg.get("seed", 42)))
@@ -240,20 +264,45 @@ def train(cfg) -> str:
         return obj
 
     distill_section = _to_clean_dict(distill_section)
-    from .distill import DistillConfig, create_teacher
+    from .distill import DistillConfig, create_teacher, get_teacher_output
     distill_cfg = DistillConfig(**distill_section) if isinstance(distill_section, dict) else DistillConfig()
+    distill_temp_schedule = str(getattr(distill_cfg, "affinity_temp_schedule", "constant") or "constant").lower()
+    if distill_temp_schedule not in {"constant", "linear", "cosine"}:
+        print(f"[Warn] Unknown affinity_temp_schedule='{distill_temp_schedule}'. Fallback to 'constant'.")
+        distill_temp_schedule = "constant"
+    distill_temp_start = float(
+        distill_cfg.affinity_temp
+        if getattr(distill_cfg, "affinity_temp_start", None) is None
+        else distill_cfg.affinity_temp_start
+    )
+    distill_temp_end = float(
+        distill_cfg.affinity_temp
+        if getattr(distill_cfg, "affinity_temp_end", None) is None
+        else distill_cfg.affinity_temp_end
+    )
+    adaptive_teacher_weight = bool(getattr(distill_cfg, "adaptive_teacher_weight", False))
+    adaptive_teacher_tau = float(getattr(distill_cfg, "adaptive_teacher_tau", 0.07))
+    adaptive_teacher_w_min = float(getattr(distill_cfg, "adaptive_teacher_w_min", 0.0))
 
     teacher = None
-    if distill_cfg.use_teacher:
+    offline_dir = distill_section.get('offline_feature_dir', None) if isinstance(distill_section, dict) else None
+    use_offline = (
+        distill_cfg.use_teacher
+        and offline_dir is not None
+        and os.path.isdir(str(offline_dir))
+    )
+
+    if distill_cfg.use_teacher and not use_offline:
         if device != "cuda":
             print("[Warn] distill.use_teacher=True but device is not cuda. Teacher may be slow on CPU.")
-        
         try:
             teacher = create_teacher(distill_cfg, device=str(device))
-            print(f"[Train] Teacher initialized: {teacher}")
+            print(f"[Train] Teacher initialized (Online mode)")
         except Exception as e:
             print(f"[Train] Failed to load teacher: {e}")
             raise e
+    elif use_offline:
+        print(f"[Train] Offline mode — Teacher NOT loaded. Embeddings from: {offline_dir}")
 
     best_r10 = -1.0
     best_path = os.path.join(out_dir, "best.pt")
@@ -267,6 +316,14 @@ def train(cfg) -> str:
           f"label_smoothing={label_smoothing}")
     print(f"[Config] w_hard_negative={w_hard_negative}, w_text_text={w_text_text}, hard_negative_k={hard_negative_k}")
     print(f"[Config] logit_scale_range=[{logit_scale_min}, {logit_scale_max}]")
+    print(
+        f"[Config] distill_temp_schedule={distill_temp_schedule}, "
+        f"start={distill_temp_start:.4f}, end={distill_temp_end:.4f}"
+    )
+    print(
+        f"[Config] adaptive_teacher_weight={adaptive_teacher_weight}, "
+        f"tau={adaptive_teacher_tau:.4f}, w_min={adaptive_teacher_w_min:.4f}"
+    )
 
     # ---- [NEW] EMA 초기화 ----
     use_ema = bool(cfg.train.get("use_ema", True))
@@ -280,13 +337,23 @@ def train(cfg) -> str:
 
     for epoch in range(epochs):
         model.train()
+        current_affinity_temp = _scheduled_distill_temp(
+            epoch_idx=epoch,
+            total_epochs=epochs,
+            start=distill_temp_start,
+            end=distill_temp_end,
+            schedule=distill_temp_schedule,
+        )
+        if distill_cfg.use_teacher:
+            print(f"[Distill] epoch {epoch+1}/{epochs} affinity_temp={current_affinity_temp:.4f}")
         pbar = tqdm(train_loader, desc=f"epoch {epoch+1}/{epochs}")
 
-        for step, (imgs, toks, metas) in enumerate(pbar, start=1):
-            imgs = imgs.to(device, non_blocking=True)
-            toks = toks.to(device, non_blocking=True)
+        for step, batch_data in enumerate(pbar, start=1):
+            imgs = batch_data[0].to(device, non_blocking=True)
+            toks = batch_data[1].to(device, non_blocking=True)
+            metas = batch_data[2]
+            offline_teacher_embs = batch_data[3] if len(batch_data) > 3 else None
 
-            # meta 정보 버리지 않고 image_id 리스트 추출 후 텐서로 변환해서 gpu로 보내기
             image_ids = torch.tensor([m['image_id'] for m in metas], device=device, dtype=torch.long)
 
             optimizer.zero_grad(set_to_none=True)
@@ -324,20 +391,15 @@ def train(cfg) -> str:
                         txt_emb, image_ids, model.logit_scale,
                     )
 
-            # ---- distill (outside autocast for teacher stability) ----
-            # ---- distill (outside autocast for teacher stability) ----
-            if teacher is not None:
-                # teacher expects RAW [0,1] images (OpenClipTeacher handles normalization)
-                imgs_teacher = imgs.float()
-                
-                # Extract raw captions from metas (each teacher tokenizes independently)
-                raw_captions = [m['caption'] for m in metas]
+            teacher_out = get_teacher_output(
+                teacher=teacher,
+                imgs=imgs,
+                metas=metas,
+                offline_teacher_embs=offline_teacher_embs,
+                device=str(device),
+            )
 
-                with torch.no_grad():
-                    # Returns (img, txt) OR [(img, txt), ...]
-                    teacher_out = teacher(imgs_teacher, raw_captions)
-
-                # student normalize for cosine space (safe even if model already normalizes)
+            if teacher_out is not None:
                 s_img = F.normalize(img_emb.float(), dim=-1)
                 s_txt = F.normalize(txt_emb.float(), dim=-1)
 
@@ -346,12 +408,15 @@ def train(cfg) -> str:
                     student_txt=s_txt,
                     teacher_output=teacher_out,
                     teachers_cfg=distill_cfg.teachers,
-                    affinity_temp=distill_cfg.affinity_temp,
+                    affinity_temp=current_affinity_temp,
+                    adaptive_teacher_weight=adaptive_teacher_weight,
+                    adaptive_teacher_tau=adaptive_teacher_tau,
+                    adaptive_teacher_w_min=adaptive_teacher_w_min,
                     affinity_columns=distill_cfg.affinity_columns,
                     distill_margin_thr=distill_cfg.distill_margin_thr,
                     selective=True,
+                    image_ids=image_ids,
                 )
-
                 loss = loss + (w_distill_affinity * distill_loss_val)
 
             # backward
@@ -384,8 +449,9 @@ def train(cfg) -> str:
                     "scale": f"{model.logit_scale.exp().item():.2f}",
                     "lr": f"{current_lr:.2e}",
                 }
-                if teacher is not None:
+                if teacher is not None or use_offline:
                     postfix["distill"] = f"{distill_loss_val.item():.4f}"
+                    postfix["dtemp"] = f"{current_affinity_temp:.3f}"
                 pbar.set_postfix(postfix)
                 # [OPTIONAL] WandB step logging
                 logger.log({"train/loss": loss.item(), "train/lr": current_lr})

@@ -27,9 +27,16 @@ class DistillConfig:
     teacher_pretrained: Optional[str] = None
     teacher_type: Optional[str] = None
     
-    distill_margin_thr: float = 0.2          # selective distill threshold
+    distill_margin_thr: float = 0.2
     affinity_temp: float = 0.1
+    affinity_temp_start: Optional[float] = None
+    affinity_temp_end: Optional[float] = None
+    affinity_temp_schedule: str = "constant"  # constant | linear | cosine
+    adaptive_teacher_weight: bool = False
+    adaptive_teacher_tau: float = 0.07
+    adaptive_teacher_w_min: float = 0.0
     affinity_columns: bool = False
+    offline_feature_dir: Optional[str] = None
 
     def __post_init__(self):
         # Handle legacy config format by converting to list
@@ -207,8 +214,76 @@ def create_teacher(cfg: DistillConfig, device: str = "cuda") -> nn.Module:
 # --- Loss Functions ---
 
 def _margin_from_logits(logits: torch.Tensor) -> torch.Tensor:
+    # For tiny smoke batches (e.g., B=1), top-2 margin is undefined.
+    # Return zeros so selective distillation can safely proceed.
+    if logits.ndim != 2 or logits.size(1) < 2:
+        return logits.new_zeros((logits.size(0),), dtype=logits.dtype)
     top2 = torch.topk(logits, k=2, dim=1).values
     return top2[:, 0] - top2[:, 1]
+
+
+def _teacher_quality_margin(t_sim: torch.Tensor, image_ids: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+    """
+    Batch-level teacher quality score:
+      margin = mean(sim positives) - mean(sim negatives)
+    """
+    if image_ids is None:
+        return None
+
+    if not torch.is_tensor(image_ids):
+        image_ids = torch.as_tensor(image_ids, device=t_sim.device)
+    else:
+        image_ids = image_ids.to(device=t_sim.device)
+
+    if image_ids.ndim != 1 or image_ids.numel() != t_sim.size(0):
+        return None
+
+    pos_mask = image_ids.unsqueeze(0).eq(image_ids.unsqueeze(1))
+    neg_mask = ~pos_mask
+
+    pos_vals = t_sim[pos_mask]
+    neg_vals = t_sim[neg_mask]
+    if pos_vals.numel() == 0 or neg_vals.numel() == 0:
+        return None
+
+    return pos_vals.mean() - neg_vals.mean()
+
+
+def _normalize_static_weights(weights: List[float], device: torch.device) -> torch.Tensor:
+    w = torch.tensor([max(0.0, float(x)) for x in weights], device=device, dtype=torch.float32)
+    s = w.sum()
+    if s <= 0:
+        w = torch.ones_like(w)
+        s = w.sum()
+    return w / s
+
+
+def _adaptive_weights_from_scores(
+    scores: torch.Tensor,
+    tau: float = 0.07,
+    w_min: float = 0.0,
+) -> torch.Tensor:
+    """
+    Convert teacher quality scores into normalized mixing weights.
+    """
+    if scores.numel() == 1:
+        return torch.ones_like(scores)
+
+    tau = max(float(tau), 1e-6)
+    shifted = (scores / tau) - (scores / tau).max()
+    w = torch.softmax(shifted, dim=0)
+
+    # Optional floor to avoid single-teacher collapse.
+    n = int(w.numel())
+    w_min = max(0.0, float(w_min))
+    if w_min > 0.0:
+        if n * w_min >= 1.0:
+            w = torch.full_like(w, 1.0 / n)
+        else:
+            w = w * (1.0 - n * w_min) + w_min
+
+    return w / w.sum().clamp(min=1e-12)
+
 
 def affinity_kl_rows(student_logits, teacher_logits, temp=0.1, row_mask=None):
     if row_mask is not None:
@@ -226,9 +301,13 @@ def compute_affinity_distill_loss(
     teacher_output: Union[Tuple[torch.Tensor, torch.Tensor], List[Tuple[torch.Tensor, torch.Tensor]]],
     teachers_cfg: Optional[List[TeacherConfig]] = None,
     affinity_temp: float = 0.1,
+    adaptive_teacher_weight: bool = False,
+    adaptive_teacher_tau: float = 0.07,
+    adaptive_teacher_w_min: float = 0.0,
     affinity_columns: bool = False,
     distill_margin_thr: float = 0.2,
     selective: bool = True,
+    image_ids: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Computes distillation loss. Handles both Single Teacher and Ensemble Teacher.
@@ -241,16 +320,32 @@ def compute_affinity_distill_loss(
         if len(teacher_output) == 0:
             return s_sim.new_tensor(0.0)
 
+        # Precompute teacher similarity matrices once (used by loss + adaptive scoring).
+        t_sims = [t_img @ t_txt.t() for (t_img, t_txt) in teacher_output]
+
         if teachers_cfg and len(teachers_cfg) == len(teacher_output):
             weights = [max(0.0, float(cfg.weight)) for cfg in teachers_cfg]
         else:
             weights = [1.0] * len(teacher_output)
 
-        weight_sum = sum(weights)
-        if weight_sum <= 0:
-            weights = [1.0] * len(teacher_output)
-            weight_sum = float(len(weights))
-        norm_weights = [w / weight_sum for w in weights]
+        static_weights = _normalize_static_weights(weights, device=s_sim.device)
+        adaptive_weights = None
+        if adaptive_teacher_weight and len(teacher_output) > 1:
+            scores = []
+            for t_sim in t_sims:
+                score = _teacher_quality_margin(t_sim, image_ids)
+                if score is None:
+                    score = t_sim.new_tensor(0.0)
+                scores.append(score)
+            score_tensor = torch.stack(scores, dim=0)
+            if torch.isfinite(score_tensor).all():
+                adaptive_weights = _adaptive_weights_from_scores(
+                    score_tensor,
+                    tau=adaptive_teacher_tau,
+                    w_min=adaptive_teacher_w_min,
+                )
+
+        norm_weights = adaptive_weights if adaptive_weights is not None else static_weights
 
         row_mask = None
         col_mask = None
@@ -262,8 +357,7 @@ def compute_affinity_distill_loss(
                 col_mask = margin_t < distill_margin_thr
 
         total_loss = s_sim.new_tensor(0.0)
-        for weight, (t_img, t_txt) in zip(norm_weights, teacher_output):
-            t_sim = t_img @ t_txt.t()
+        for weight, t_sim in zip(norm_weights, t_sims):
 
             loss = affinity_kl_rows(s_sim, t_sim, temp=affinity_temp, row_mask=row_mask)
 
@@ -294,4 +388,29 @@ def compute_affinity_distill_loss(
             loss += affinity_kl_rows(s_sim.t(), t_sim.t(), temp=affinity_temp, row_mask=col_mask)
 
         return loss
+
+
+def get_teacher_output(
+    teacher,
+    imgs: torch.Tensor,
+    metas: list,
+    offline_teacher_embs=None,
+    device: str = "cuda",
+):
+    """Unified interface for teacher embeddings (Online forward or Offline pre-extracted)."""
+    if offline_teacher_embs is not None:
+        teacher_out = [
+            (t_img.to(device).float(), t_txt.to(device).float())
+            for t_img, t_txt in offline_teacher_embs
+        ]
+        return teacher_out if len(teacher_out) > 1 else teacher_out[0]
+
+    if teacher is not None:
+        imgs_teacher = imgs.float()
+        raw_captions = [m['caption'] for m in metas]
+        with torch.no_grad():
+            return teacher(imgs_teacher, raw_captions)
+
+    return None
+
 

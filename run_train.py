@@ -17,7 +17,7 @@ from pathlib import Path
 # Add src to path for local imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from lpcvc_retrieval.config import load_config
+from lpcvc_retrieval.config import load_config, resolve_device
 from lpcvc_retrieval.train import train
 
 
@@ -32,6 +32,12 @@ def main():
         default="config.yaml",
         help="Path to config YAML file"
     )
+    parser.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        help="Override config key-value (e.g., --override train.epochs=1)"
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -40,14 +46,21 @@ def main():
         sys.exit(1)
 
     print(f"[Config] Loading: {config_path}")
-    cfg = load_config(str(config_path))
+    cfg = load_config(str(config_path), overrides=args.override)
+    if args.override:
+        print("[Config] Overrides:")
+        for item in args.override:
+            print(f"  - {item}")
     
-    # GPU 정보 출력
-    if torch.cuda.is_available():
+    # Resolve execution device from config for accurate banner logging.
+    resolved_device = resolve_device(cfg.get("device", "auto"))
+    if resolved_device == "cuda" and torch.cuda.is_available():
         device_name = torch.cuda.get_device_name(0)
         device_info = f"GPU: {device_name}"
+    elif resolved_device == "cuda" and not torch.cuda.is_available():
+        device_info = "CPU (cfg requested cuda, but GPU not available)"
     else:
-        device_info = "CPU (GPU not available)"
+        device_info = "CPU"
     
     print("=" * 60)
     print("  MobileCLIP2-Retrieval-Optimization Training")
