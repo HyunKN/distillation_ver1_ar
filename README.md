@@ -327,6 +327,9 @@ python -c "import qai_hub as hub; d=hub.Device('XR2 Gen 2 (Proxy)'); m=hub.get_j
 
 This project is licensed under the MIT License.
 
+- Full MIT text: [`LICENSE`](./LICENSE)
+- Third-party notices: [`THIRD_PARTY_LICENSES.md`](./THIRD_PARTY_LICENSES.md)
+
 ### Third-Party Model Licenses
 
 | 구분 | 라이선스 | 비고 |
@@ -337,7 +340,7 @@ This project is licensed under the MIT License.
 | **PE-Core-bigG-14-448 (Teacher 2)** | Apache 2.0 | [모델 카드 확인](https://huggingface.co/facebook/PE-Core-G14-448), [PE 저장소](https://github.com/facebookresearch/perception_models) |
 | **OpenCLIP 프레임워크** | MIT | [저장소](https://github.com/mlfoundations/open_clip) |
 
-> ⚠️ 모델 가중치 재배포/상업 사용 전 각 모델 카드의 라이선스 원문을 반드시 재확인하세요.
+> ⚠️ 모델 가중치/데이터셋은 MIT가 아닐 수 있습니다. 재배포/상업 사용 전 각 모델 카드와 데이터셋 이용약관을 반드시 재확인하세요.
 
 ## 🙏 Acknowledgements
 
