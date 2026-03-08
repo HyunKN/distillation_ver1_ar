@@ -18,6 +18,7 @@ data/
 
 # Checkpoints & Logs
 runs/
+features/
 logs/
 checkpoints/
 wandb/

@@ -18,6 +18,13 @@ def build_tokenizer() -> CLIPTokenizer:
     return CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
 
 
+def _clean_source(source: Any) -> str:
+    if not isinstance(source, str):
+        return "unknown"
+    source = source.strip()
+    return source if source else "unknown"
+
+
 def _img_transform_train(augment: bool = True) -> transforms.Compose:
     """
     Training transform with optional augmentation.
@@ -70,8 +77,8 @@ class JsonlRetrievalDataset(Dataset):
         # Use augmentation only for training
         self.tf = _img_transform_train(augment) if is_train else _img_transform_eval()
 
-        # Train: (img_rel, image_id, captions)
-        # Eval:  (img_rel, image_id, caption, ann_id)
+        # Train: (img_rel, image_id, captions, source)
+        # Eval:  (img_rel, image_id, caption, ann_id, source)
         self.samples: List[Tuple[Any, ...]] = []
         image_counter = 0
         with open(jsonl_path, "r", encoding="utf-8") as f:
@@ -93,11 +100,13 @@ class JsonlRetrievalDataset(Dataset):
                     image_id = image_counter
                 image_counter += 1
 
+                source = _clean_source(obj.get("source"))
+
                 if self.is_train:
-                    self.samples.append((img_rel, image_id, caps))
+                    self.samples.append((img_rel, image_id, caps, source))
                 else:
                     for ann_id, cap in enumerate(caps):
-                        self.samples.append((img_rel, image_id, cap, ann_id))
+                        self.samples.append((img_rel, image_id, cap, ann_id, source))
 
     def set_forced_caption_indices(self, caption_indices):
         """Force deterministic caption selection per sample index (offline distillation mode)."""
@@ -115,7 +124,7 @@ class JsonlRetrievalDataset(Dataset):
         item = self.samples[idx]
 
         if self.is_train:
-            img_rel, image_id, caps = item
+            img_rel, image_id, caps, source = item
             forced = self._forced_caption_indices
 
             if forced is not None and idx < len(forced):
@@ -138,7 +147,7 @@ class JsonlRetrievalDataset(Dataset):
                     cap = caps[0]
             ann_id = None
         else:
-            img_rel, image_id, cap, ann_id = item
+            img_rel, image_id, cap, ann_id, source = item
             cap_idx = None
             
         img_path = os.path.join(self.image_root, img_rel)
@@ -161,6 +170,7 @@ class JsonlRetrievalDataset(Dataset):
             "caption": cap,
             "caption_idx": cap_idx,
             "img_rel": img_rel,
+            "source": source,
         }
         # 기존: return x, input_ids, cap
         # 변경: 아래와 같이 return하여 loss 계산 시 image_id를 쓸 수 있게 합니다.
@@ -215,7 +225,7 @@ class CocoCaptionsRetrievalDataset(Dataset):
                     continue
                 img_rel = f"{self.split}/{file_name}"
                 # [수정] image_id를 튜플에 포함
-                self.samples.append((img_rel, int(image_id), c))
+                self.samples.append((img_rel, int(image_id), c, "coco"))
         else:
             # Eval: 캡션 단위로 samples 생성 (image_id 포함)
             for ann in coco.get("annotations", []):
@@ -233,7 +243,9 @@ class CocoCaptionsRetrievalDataset(Dataset):
                     continue
 
                 img_rel = f"{self.split}/{file_name}"
-                self.samples.append((img_rel, int(image_id), caption, int(ann_id) if ann_id is not None else None))
+                self.samples.append(
+                    (img_rel, int(image_id), caption, int(ann_id) if ann_id is not None else None, "coco")
+                )
 
     def set_forced_caption_indices(self, caption_indices):
         """Force deterministic caption selection per sample index (offline distillation mode)."""
@@ -251,7 +263,7 @@ class CocoCaptionsRetrievalDataset(Dataset):
         item = self.samples[idx]
 
         if self.is_train:
-            img_rel, image_id, caps = item
+            img_rel, image_id, caps, source = item
             forced = self._forced_caption_indices
 
             if forced is not None and idx < len(forced):
@@ -275,7 +287,7 @@ class CocoCaptionsRetrievalDataset(Dataset):
 
             ann_id = None
         else:
-            img_rel, image_id, cap, ann_id = item
+            img_rel, image_id, cap, ann_id, source = item
             cap_idx = None
 
         img_path = os.path.join(self.coco_root, img_rel)
@@ -297,6 +309,7 @@ class CocoCaptionsRetrievalDataset(Dataset):
             "caption": cap,
             "caption_idx": cap_idx,
             "img_rel": img_rel,
+            "source": source,
         }
         return x, input_ids, meta
 

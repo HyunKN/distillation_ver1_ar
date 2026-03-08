@@ -1,131 +1,141 @@
-# 🚀 MobileCLIP2 Retrieval Optimization
+# MobileCLIP2 Retrieval Optimization
 
-> LPCVC 2026을 위한 Apple MobileCLIP2-S0 기반 모바일 최적화 멀티모달 검색 모델
+> LPCVC 2026 Track 1 — MobileCLIP2 기반 이미지-텍스트 검색 경량 모델 학습 및 지식 증류
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 
-## 📖 Overview
+## Overview
 
-Apple의 **MobileCLIP2-S0** (이미지+텍스트 사전 학습 완성형 모델)을 학생 모델로 채택하고, SOTA Teacher 모델(SigLIP 2 Giant, PE-Core bigG/14)로 지식 증류(Distillation)하여 모바일에서 빠르고 정확하게 동작하는 이미지-텍스트 검색 AI를 구축합니다.
+Apple `MobileCLIP2-S0`를 학생 모델로, 두 개의 대형 teacher 모델로 지식 증류를 수행해 모바일 환경 이미지-텍스트 검색 모델을 학습합니다.
 
-**핵심 특징:**
-- 🥇 **Multi-Modal Pre-trained Student**: 이미지-텍스트 매칭이 이미 사전 학습된 MobileCLIP2-S0 (11.4M Vision / 63.4M Text)
-- 🎓 **Dual Teacher Distillation**: SigLIP 2 Giant + PE-Core-bigG-14-448
-- ⚡ **Mobile-first**: XR2 Gen 2 기준 Image 9.1ms / Text 3.5ms 실측
-- 🔧 **최신 기술**: Mixed Precision, EMA, Gradient Clipping, torch.compile
-
-## 📚 문서 역할 분담
-
-- `README.md`: 프로젝트 흐름, 핵심 기술, 실행 방법, 설정값 조작(실행 중심)
-- `PROJECT_GUIDE.md`: 코드/알고리즘/아키텍처/라이선스/논문 근거(심화 설명)
-- 원칙: 둘 다 출처를 명시하며, README는 요약/실행 관점으로 유지합니다.
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Teacher Models                        │
-│  ┌─────────────────────┐  ┌─────────────────────────┐  │
-│  │   SigLIP 2 Giant    │  │ PE-Core bigG/14-448      │  │
-│  │   (~6.97GB, 50%)    │  │   (~9.01GB, 50%)         │  │
-│  └──────────┬──────────┘  └───────────┬─────────────┘  │
-│             │     Knowledge Distillation     │          │
-│             └─────────────┬─────────────────┘          │
-│                           ▼                             │
-│          ┌──────────────────────────────┐              │
-│          │  MobileCLIP2-S0 (Apple)      │              │
-│          │  V: 11.4M (9.1ms) Image Enc │              │
-│          │  T: 63.4M (3.5ms) Text Enc  │              │
-│          │  Pre-trained Multi-Modal     │              │
-│          └──────────────────────────────┘              │
-└─────────────────────────────────────────────────────────┘
-```
-
-### 💡 직관적인 모델 및 구조 설명
-
-본 프로젝트는 고성능 이미지 검색 AI를 스마트폰 환경에 맞게 최적화하기 위해, **경량 학생 모델(Student)**과 압도적인 성능을 가진 두 개의 **선생님 모델(Teachers)**을 활용하는 **지식 증류(Knowledge Distillation)** 기법을 사용합니다.
-
-#### 📱 1. 학생 모델: Apple MobileCLIP2-S0
-실제로 스마트폰/XR 디바이스에서 작동할 초경량 멀티모달 모델입니다.
-* **비전 인코더 (11.4M params):** Apple이 모바일 NPU에 최적화하여 설계한 MobileOne 기반 아키텍처. XR2 Gen 2에서 **9.1ms** 실측.
-* **텍스트 인코더 (63.4M params):** 이미지-텍스트 매칭이 사전 학습된 내장 텍스트 인코더. XR2 Gen 2에서 **3.5ms** 실측.
-* **선택 이유:** 이미지와 텍스트를 연결하는 멀티모달 지식이 **이미 사전 학습 완료**된 상태이므로, 다른 조처럼 빈 깡통 부품(FastViT 등)을 조립하여 처음부터 가르칠 필요 없이 즉시 파인튜닝이 가능합니다. 동급 파라미터(11M) 대비 압도적인 Recall 성능을 발휘합니다.
-
-#### 🔍 2. 첫 번째 선생님: SigLIP 2 Giant
-학생 모델에게 **정밀한 텍스트-이미지 매칭 능력**을 전수해 줄 첫 번째 전문가 모델입니다.
-* **선택 이유:** SigLIP 2는 현재 업계 최고 수준(SOTA)의 비전-언어 모델 중 하나로, 이미지의 미세한 디테일과 복잡한 언어적 문맥을 연결하는 데 탁월한 성능을 보입니다. 작은 학생 모델이 놓치기 쉬운 세밀한 특징들을 스스로 찾아내도록 지도합니다.
-
-#### 🌐 3. 두 번째 선생님: PE-Core-bigG-14-448
-학생 모델에게 **강한 전역 시각 인식/검색 prior**를 전수해 줄 두 번째 전문가 모델입니다.
-* **선택 이유:** Meta FAIR의 최신 Perception Encoder 계열 중 고성능 모델로, 이미지-텍스트 정렬(검색) 벤치에서 강한 성능을 보여줍니다. 현재 기본 조합은 라이선스 리스크를 낮추기 위해 Apache-2.0 계열 teacher로 구성했습니다.
+**핵심 사항**
+- **학생 모델**: `MobileCLIP2-S0` — 사전학습된 멀티모달 경량 모델 파인튜닝
+- **Teacher 모델**: `ViT-gopt-16-SigLIP2-256` + `PE-Core-bigG-14-448`
+- **Dual Distillation**: 배치/샘플 품질 기반 adaptive teacher weighting
+- **Offline Feature 모드**: teacher VRAM 없이 반복 실험 가능
+- **배포 경로**: ONNX export → Qualcomm AI Hub compile/profile
 
 ---
 
-#### ⚖️ 왜 두 개의 선생님 모델(Dual Teacher)을 사용하나요?
-단일 선생님 모델에만 의존할 경우 해당 모델이 가진 '특정 학습 편향'까지 학생이 그대로 물려받을 위험이 있습니다. 
-마치 전공 분야가 다른 두 명의 명문대 교수님에게 수업을 듣는 것처럼, **정밀한 텍스트-이미지 정렬에 강한 SigLIP 2**와 **강한 전역 인식 성능의 PE-Core**를 결합하면 각각의 장점만을 안전하게 취할 수 있습니다. 기본 비율은 5:5로 두고(재현성), 필요 시 Adaptive Teacher Weight로 배치별 동적 가중합을 적용해 학생에게 전달합니다.
+## 문서 안내
 
-## 🚀 Quick Start
+> 자세한 프로젝트 방향과 코드 상세는 아래 문서를 참고하세요.
+
+| 문서 | 역할 |
+|------|------|
+| `docs/PROJECT_MAP.md` | 프로젝트 전체 구조, 방향, 운영 기본값, 학습 로드맵 — 길잡이 |
+| `docs/PROJECT_GUIDE.md` | 코드 구조, 함수 상세, 학습/증류/배포 흐름 — 세부 매뉴얼 |
+| `docs/README.md` | 문서 인덱스 및 읽는 순서 |
+| `docs/archive/` | 완료된 handover 및 정리 기록 |
+
+---
+
+## Architecture
+
+```text
+┌────────────────────────────────────────────────────────────┐
+│                        Teacher Models                      │
+│  ┌────────────────────────┐   ┌─────────────────────────┐  │
+│  │ ViT-gopt-16-SigLIP2-256│   │  PE-Core-bigG-14-448   │  │
+│  │     (text-image align) │   │ (visual robustness)    │  │
+│  └────────────┬───────────┘   └────────────┬────────────┘  │
+│               │                            │               │
+│               └──── adaptive teacher weighting ───────────┘│
+│                                │                           │
+└────────────────────────────────┼───────────────────────────┘
+                                 ▼
+                  ┌─────────────────────────────────┐
+                  │     MobileCLIP2-S0 Student      │
+                  │  image encoder + text encoder   │
+                  │   contrastive + distill losses  │
+                  └─────────────────────────────────┘
+                                 │
+                   ┌─────────────┴─────────────┐
+                   ▼                           ▼
+            Retrieval Evaluation          ONNX Export
+           (I2T / T2I Recall@K)        + QAI Hub Compile/Profile
+```
+
+### 모델 및 구조 설명
+
+#### 1. 학생 모델 — MobileCLIP2-S0
+
+실제 배포 대상입니다. 이미지와 텍스트를 각각 임베딩으로 변환하고, 두 임베딩의 유사도로 검색을 수행합니다.
+
+- 코드: `src/lpcvc_retrieval/mobileclip2.py`
+- 팩토리: `src/lpcvc_retrieval/model.py`
+- 기본 임베딩 차원: `256`
+
+#### 2. Teacher 모델 — SigLIP 2 + PE-Core
+
+두 teacher 모두 `open_clip`으로 로드합니다.
+
+- `ViT-gopt-16-SigLIP2-256` — 이미지-텍스트 정렬 품질이 강한 teacher
+- `PE-Core-bigG-14-448` — 시각적 강건성이 강한 teacher
+- `distill.teachers` — 어떤 teacher를 쓸지 정의하는 목록
+- `distill.static_teacher_weights` — `teacher_weight_mode=static`일 때만 쓰는 mixing 설정
+
+#### 3. 현재 기본 Distillation 방식
+
+```yaml
+distill:
+  adaptive_teacher_weight: true
+  static_teacher_weights: [0.5, 0.5]
+  teacher_weight_mode: adaptive
+  source_teacher_weights: {}
+```
+
+- teacher 둘 다 사용
+- source prior 없이 순수 adaptive routing
+- 현재 배치/샘플에서 더 우수한 teacher에 비중을 부여
+- `static_teacher_weights`는 현재 기본 모드(`adaptive`)에서는 최종 mixing 비율에 영향을 주지 않음
+
+#### 4. Offline Teacher Feature 모드
+
+teacher를 매 스텝 실행하지 않고, 미리 teacher 임베딩을 `.pt` 파일로 추출해 학습에 재사용할 수 있습니다.
+
+- VRAM 절감
+- 반복 실험 속도 개선
+- teacher 출력 재현성 확보
+
+---
+
+## Quick Start
 
 ### 1. Installation
 
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
 ```
+
+Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+Linux/macOS:
+
+```bash
+source .venv/bin/activate
+```
+
+의존성 설치:
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+pip install git+https://github.com/apple/ml-mobileclip.git
+```
+
+> **참고** — `run_train.py`는 내부에서 `src/`를 추가하므로 바로 실행 가능합니다.
+> `scripts/*.py`는 `pip install -e .`를 해두면 `PYTHONPATH` 설정 부담이 줄어듭니다.
 
 ### 2. Dataset Setup
 
-기본값은 JSONL 모드(`data.mode: jsonl`)입니다.  
-서버에서 프로젝트 루트 아래 `dataset/` 폴더를 사용할 때, 원본 4개 데이터셋(coco/flickr30k/open_images/wit)을 먼저 JSONL로 변환하세요.
-
-```bash
-# 예시: Windows CMD (프로젝트 루트에 dataset/가 있는 경우)
-python scripts\preprocess\parse_lpcvc_sources.py --data_root dataset --out_dir dataset\prepared_jsonl --val_ratio 0.01
-```
-
-전량 변환 전에 샘플 검증(권장):
-
-```bash
-python scripts\preprocess\parse_lpcvc_sources.py --data_root dataset --sample_per_source 5 --show_examples 12 --dry_run
-```
-
-용량 제한 서버용(예: 50GB) 축소 파싱 예시:
-
-```bash
-# coco/flickr30k/wit는 전량 유지, open_images만 60,000장으로 제한
-python scripts\preprocess\parse_lpcvc_sources.py --data_root dataset --out_dir dataset\prepared_jsonl_50gb --source_caps open_images=60000 --val_ratio 0.01
-```
-
-운영 메모:
-- 현재는 용량 제약으로 축소셋(약 18.8만 장)을 사용합니다.
-- 추후 충분한 용량의 서버에서는 **약 30만 장 규모 데이터셋**으로 확장 학습할 예정입니다.
-
-#### 📊 내 데이터셋 구조 및 비율
-
-**[이미지 기준(중복 제거)]**
-- **coco:** 123,287장 (`train2017` 118,287 + `val2017` 5,000)
-- **flickr30k:** 31,783장
-- **open_images:** 125,436장
-- **wit:** 2,710장
-- **합계:** **283,216장**
-
-참고:
-- JSONL의 `train/val` 행 수는 "이미지 수"와 다를 수 있습니다(한 이미지에 여러 캡션이 붙기 때문).
-
-**[비율 (중복 제거 가정 총 283,216장 기준)]**
-- **open_images:** 125,436장 (44.29%)
-- **coco:** 123,287장 (43.53%)
-- **flickr30k:** 31,783장 (11.22%)
-- **wit:** 2,710장 (0.96%)
-
-**[메타데이터 샘플 수 (jsonl)]**
-- `prepared_jsonl`: train 275,212 / val 2,777 (총 277,989)
-- `prepared_jsonl_40gb`: train 185,678 / val 1,873
-- `prepared_jsonl_witcheck`: train 2,457 / val 24
-
-변환 후 `config.yaml`의 `data` 섹션을 아래처럼 바꿉니다:
+현재 기본 데이터 모드는 JSONL입니다.
 
 ```yaml
 data:
@@ -135,216 +145,296 @@ data:
   val_jsonl: dataset/prepared_jsonl/val.jsonl
 ```
 
-참고: 전처리 스크립트는 `scripts/preprocess/` 폴더로 분리되어 있습니다.
+JSONL 한 줄 형식:
+
+```json
+{"image":"coco/train2017/000000000009.jpg","captions":["a cat on sofa"],"source":"coco"}
+```
+
+지원하는 `source` 키: `coco`, `flickr30k`, `open_images`, `wit`
+
+**전처리**
+
+Windows:
+
+```bash
+python scripts\preprocess\parse_lpcvc_sources.py --data_root D:\LPCVC_Data --out_dir D:\LPCVC_Data\prepared_jsonl --val_ratio 0.01
+```
+
+Linux/macOS:
+
+```bash
+python scripts/preprocess/parse_lpcvc_sources.py --data_root /data/LPCVC_Data --out_dir /data/LPCVC_Data/prepared_jsonl --val_ratio 0.01
+```
+
+학습 전에 `config.yaml` 또는 `--override`로 경로를 맞춥니다.
+
+```bash
+python run_train.py --config config.yaml \
+  --override data.image_root=D:/LPCVC_Data \
+  --override data.train_jsonl=D:/LPCVC_Data/prepared_jsonl/train.jsonl \
+  --override data.val_jsonl=D:/LPCVC_Data/prepared_jsonl/val.jsonl
+```
 
 ### 2.5 Offline Teacher Feature Extraction (권장)
 
-처음 실행은 아래 2단계로 진행하면 됩니다.
+Windows:
 
-1. `run_train.py` 전에 Teacher feature를 1회 추출
-*이유:
-- Teacher를 학습 루프에서 매번 돌리지 않아서 VRAM/학습시간을 크게 줄입니다.
-- 이후 실험을 반복해도 같은 Teacher feature를 재사용할 수 있습니다.
-
-명령어:
 ```bash
-# Windows CMD
 python scripts\extract_features.py --config config.yaml --out_dir features --override data.train_augment=false
+```
 
-# Linux/macOS
+Linux/macOS:
+
+```bash
 python scripts/extract_features.py --config config.yaml --out_dir features --override data.train_augment=false
 ```
 
-추출 후 만들어져야 하는 파일(예):
-- `features/teacher_0_train.pt`
-- `features/teacher_1_train.pt`
-- `features/teacher_0_val.pt`
-- `features/teacher_1_val.pt`
+생성되는 파일:
 
-2. 생성된 feature 경로를 config에 연결한 뒤 `run_train.py` 실행
-이유:
-- 학습기가 이 경로를 보고 Teacher feature를 읽어 distillation을 수행합니다.
+| 파일 | 설명 |
+|------|------|
+| `features/teacher_0_train.pt` | Teacher 0 학습셋 임베딩 |
+| `features/teacher_1_train.pt` | Teacher 1 학습셋 임베딩 |
+| `features/teacher_0_val.pt` | Teacher 0 검증셋 임베딩 |
+| `features/teacher_1_val.pt` | Teacher 1 검증셋 임베딩 |
 
-`config.yaml` 설정:
+각 파일에 저장되는 메타: `img_embs`, `txt_embs`, `caption_indices`, `sample_count`, `dataset_fingerprint`
+
+학습 시 `OfflineFeatureDataset`가 데이터셋 길이, 임베딩 shape, `caption_indices`, `dataset_fingerprint` 일치를 검증합니다.
+
+사용 설정:
+
 ```yaml
 distill:
   offline_feature_dir: features
 ```
 
-학습 실행:
-```bash
-python run_train.py --config config.yaml
-```
-
-실행 중 확인 포인트:
-1. feature 추출 로그에 `Effective data.train_augment: False`가 출력되는지
-2. 학습 로그에 `[Train] Offline mode — Teacher NOT loaded.`가 출력되는지
-
 ### 3. Training
 
+기본 학습:
+
 ```bash
 python run_train.py --config config.yaml
 ```
 
-설정값을 세밀하게 바꿔 실행하려면 `--override key=value`를 여러 번 사용합니다.
+자주 쓰는 예시:
 
 ```bash
-# 예시 1) 스모크 테스트 (빠른 동작 확인)
+# 빠른 테스트
 python run_train.py --config config.yaml --override train.epochs=1 --override data.batch_size=32
 
-# 예시 2) 학습률/EMA/Distill 강도 조정
-python run_train.py --config config.yaml --override train.lr=1e-4 --override train.use_ema=true --override loss.w_distill_affinity=0.3
-
-# 예시 3) Teacher OFF로 파이프라인 검증
+# teacher 없이 학습
 python run_train.py --config config.yaml --override distill.use_teacher=false
+
+# offline feature 모드
+python run_train.py --config config.yaml --override distill.offline_feature_dir=features
 ```
 
-설정 조작 기준:
-- 정적 기준값은 `config.yaml`에 기록합니다.
-- 실험 파라미터는 `--override`로 바꾸고 실행 로그에 남깁니다.
-- 재현이 필요한 실험은 사용한 override 목록을 별도 메모/커밋 메시지에 저장합니다.
+기본 학습 스택:
 
-학습 전 확인:
-1. `distill.offline_feature_dir`가 실제 `.pt` feature 경로와 일치하는지
-2. `data.mode`/`train_jsonl`/`val_jsonl`이 현재 데이터셋 구조와 일치하는지
-3. 로그에 의도한 override가 출력되는지 (`[Config] Overrides:`)
+| 항목 | 설정 |
+|------|------|
+| Optimizer | AdamW |
+| Scheduler | warmup + cosine decay |
+| AMP | CUDA에서 기본 활성 |
+| EMA | 기본 활성 |
+| `torch.compile` | 기본 활성 |
+| Best checkpoint 기준 | I2T R@10 |
 
 ### 4. Evaluation
 
-```bash
-# Linux/macOS
-PYTHONPATH=src python scripts/eval.py --config config.yaml --ckpt runs/lpcvc_clip_lite/best.pt
+Windows:
 
-# Windows CMD
+```bash
 set PYTHONPATH=src && python scripts\eval.py --config config.yaml --ckpt runs\lpcvc_clip_lite\best.pt
 ```
 
-### 5. Export to ONNX
+Linux/macOS:
 
 ```bash
-# Linux/macOS
-PYTHONPATH=src python scripts/export_onnx_split.py --config config.yaml --ckpt runs/lpcvc_clip_lite/best.pt --out_dir exported_onnx
+PYTHONPATH=src python scripts/eval.py --config config.yaml --ckpt runs/lpcvc_clip_lite/best.pt
+```
 
-# Windows CMD
+- `image_id`가 있으면 COCO-style 양방향 평가
+- 없으면 index 기반 legacy retrieval 평가
+
+### 5. Export to ONNX
+
+Windows:
+
+```bash
 set PYTHONPATH=src && python scripts\export_onnx_split.py --config config.yaml --ckpt runs\lpcvc_clip_lite\best.pt --out_dir exported_onnx
 ```
 
-### 6. Qualcomm AI Hub 업로드/컴파일/프로파일
+Linux/macOS:
 
 ```bash
-# 1) 최초 1회 인증
+PYTHONPATH=src python scripts/export_onnx_split.py --config config.yaml --ckpt runs/lpcvc_clip_lite/best.pt --out_dir exported_onnx
+```
+
+출력: `exported_onnx/image_encoder.onnx`, `exported_onnx/text_encoder.onnx`
+
+### 6. Qualcomm AI Hub Compile / Profile
+
+최초 1회 인증:
+
+```bash
 qai-hub configure --api_token <YOUR_QAI_HUB_TOKEN>
-
-# 2) ONNX 업로드 + 컴파일 + 프로파일
-python compile_and_profile.py --onnx_dir exported_onnx --img_name image_encoder.onnx --txt_name text_encoder.onnx --device "XR2 Gen 2 (Proxy)"
 ```
 
-컴파일만 먼저 하고 싶으면 `--skip_profile`를 사용합니다.
+컴파일 + 프로파일:
 
 ```bash
-python compile_and_profile.py --onnx_dir exported_onnx --img_name image_encoder.onnx --txt_name text_encoder.onnx --device "XR2 Gen 2 (Proxy)" --skip_profile
+python compile_and_profile.py \
+  --onnx_dir exported_onnx \
+  --img_name image_encoder.onnx \
+  --txt_name text_encoder.onnx \
+  --device "XR2 Gen 2 (Proxy)"
 ```
 
-이미 컴파일된 Job ID가 있으면, 재컴파일 없이 프로파일만 따로 제출할 수 있습니다 (Windows CMD 한 줄):
+컴파일만 수행 (`--skip_profile`):
 
 ```bash
-python -c "import qai_hub as hub; d=hub.Device('XR2 Gen 2 (Proxy)'); m=hub.get_job('<IMAGE_COMPILE_JOB_ID>').get_target_model(); p=hub.submit_profile_job(model=m, device=d, options='--max_profiler_iterations 100'); print('image', p.job_id); m=hub.get_job('<TEXT_COMPILE_JOB_ID>').get_target_model(); p=hub.submit_profile_job(model=m, device=d, options='--max_profiler_iterations 100'); print('text', p.job_id)"
+python compile_and_profile.py \
+  --onnx_dir exported_onnx \
+  --img_name image_encoder.onnx \
+  --txt_name text_encoder.onnx \
+  --device "XR2 Gen 2 (Proxy)" \
+  --skip_profile
 ```
 
-참고:
-- `--skip_profile`로 실행하면 PROFILE 탭에는 아무것도 생기지 않고 COMPILE 탭에만 생성됩니다.
-- `image_encoder.onnx.data`, `text_encoder.onnx.data`는 ONNX 외부 가중치 파일이며 `.onnx`와 같은 폴더에 두면 업로드 시 함께 처리됩니다.
+입력 스펙: 이미지 `(1, 3, 224, 224)` float32 / 텍스트 `(1, 77)` int32
 
-## 📁 Project Structure
+---
 
-```
-├── run_train.py              # 학습 시작점
-├── config.yaml               # 설정 파일
-├── src/lpcvc_retrieval/      # 핵심 코드
-│   ├── train.py              # 학습 로직
-│   ├── model.py              # 모델 팩토리
-│   ├── mobileclip2.py        # MobileCLIP2-S0 학생 모델 래퍼
-│   ├── distill.py            # Teacher 모델 & Distillation
-│   ├── data.py               # 데이터 로딩
-│   └── losses.py             # 손실 함수
+## Project Structure
+
+```text
+.
+├── README.md                        # 실행 가이드 (이 파일)
+├── LICENSE                          # MIT License
+├── THIRD_PARTY_LICENSES.md          # 외부 모델/데이터 라이선스 정보
+├── config.yaml                      # 학습 설정
+├── pyproject.toml                   # 패키지 메타데이터
+├── requirements.txt                 # 의존성
+├── run_train.py                     # 학습 엔트리포인트
+├── compile_and_profile.py           # QAI Hub 컴파일/프로파일
+│
+├── docs/
+│   ├── README.md                    # 문서 인덱스
+│   ├── PROJECT_GUIDE.md             # 코드 구조 및 기술 상세
+│   └── archive/                     # 완료된 기록
+│       ├── ROOT_DOCS_CLEANUP_SUMMARY.md
+│       └── completed-tasks/
+│           └── 260228_COMPARISON_AND_TRAINING_METHODS_HANDOVER.md
+│
 ├── scripts/
-│   ├── eval.py               # 성능 평가
-│   ├── export_onnx_split.py  # ONNX 변환
+│   ├── eval.py                      # 체크포인트 평가
+│   ├── export_onnx_split.py         # ONNX 분리 export
+│   ├── extract_features.py          # Offline teacher feature 추출
 │   └── preprocess/
-│       ├── parse_lpcvc_sources.py        # LPCVC 원본 4종(coco/flickr/open_images/wit) 파싱
-│       └── materialize_upload_subset.py  # 업로드용 subset 데이터 구성
-└── compile_and_profile.py    # Qualcomm AI Hub
+│       ├── parse_lpcvc_sources.py   # JSONL 전처리
+│       └── materialize_upload_subset.py
+│
+└── src/lpcvc_retrieval/
+    ├── __init__.py
+    ├── config.py                    # 설정 로딩/파싱
+    ├── data.py                      # 데이터 파이프라인
+    ├── distill.py                   # Teacher 로딩 및 distillation
+    ├── ema.py                       # Exponential Moving Average
+    ├── export.py                    # ONNX export 유틸
+    ├── logger.py                    # 학습 로거
+    ├── losses.py                    # 손실 함수 모음
+    ├── metrics.py                   # Retrieval 평가 지표
+    ├── mobileclip2.py               # MobileCLIP2 학생 모델 래퍼
+    ├── model.py                     # 모델 팩토리
+    └── train.py                     # 학습 루프
 ```
 
-## ⚙️ Configuration
+---
 
-주요 설정 (`config.yaml`):
+## Configuration
+
+자주 확인하는 설정:
 
 | 설정 | 기본값 | 설명 |
 |------|--------|------|
-| `batch_size` | 128 | GPU 메모리에 따라 조정 |
-| `lr` | 5e-4 | 학습률 |
-| `epochs` | 10 | 학습 에폭 |
-| `use_teacher` | true | Teacher Distillation 사용 |
-| `amp` | true | Mixed Precision 학습 |
+| `data.mode` | `jsonl` | 데이터 로더 모드 |
+| `data.batch_size` | `128` | 학습 배치 크기 |
+| `data.max_captions_per_image` | `5` | 캡션 샘플링 상한 |
+| `model.mobileclip2_variant` | `S0` | 학생 모델 variant |
+| `model.embed_dim` | `256` | 최종 임베딩 차원 |
+| `distill.use_teacher` | `true` | Teacher distillation 사용 |
+| `distill.adaptive_teacher_weight` | `true` | 동적 가중치 활성화 |
+| `distill.teacher_weight_mode` | `adaptive` | Teacher routing 모드 |
+| `distill.static_teacher_weights` | `[0.5, 0.5]` | `static` 모드 전용 mixing 비율 |
+| `distill.source_teacher_weights` | `{}` | `adaptive_source` 전용 source prior |
+| `distill.offline_feature_dir` | `null` | Offline feature 경로 |
+| `loss.w_distill_affinity` | `0.8` | Affinity distillation 비중 |
+| `train.use_compile` | `true` | `torch.compile` 사용 |
+| `train.use_ema` | `true` | EMA 사용 |
+| `output.out_dir` | `runs/lpcvc_clip_lite` | 체크포인트 출력 경로 |
 
-## 📊 Performance Targets & Profiling (MobileCLIP2-S0)
+---
 
-| Metric | Target | Current (XR2 Gen 2) | Description |
-|--------|--------|---------------------|-------------|
-| R@1 | >25% | - | Top-1 Recall |
-| R@5 | >50% | - | Top-5 Recall |
-| R@10 | >60% | - | Top-10 Recall |
-| Image Latency | <10ms | **9.1 ms** | 비전 인코더 단독 추론 (채점 기준) |
-| Text Latency | - | 3.5 ms | 텍스트 인코더 단독 추론 (사전 연산용) |
-| Image Params | - | **11.4 M** | 비전 인코더 모델 파라미터 수 |
-| Text Params | - | 63.4 M | 텍스트 인코더 모델 파라미터 수 |
-| Image Size (ONNX) | <50MB | 43.7 MB | 비전 인코더 모델 용량 |
+## Performance Targets
 
-측정 출처:
-- Image/Text latency는 Qualcomm AI Hub `XR2 Gen 2 (Proxy)` 프로파일 결과(내부 실험 로그) 기준입니다.
-- 모델 파라미터/용량은 모델 카드 및 ONNX export 산출물 기준입니다.
+| 항목 | 현재 코드 기준 |
+|------|----------------|
+| 주 평가 지표 | I2T / T2I Recall@1, 5, 10 |
+| Best checkpoint 선정 | I2T R@10 |
+| 학생 입력 해상도 | 224 x 224 |
+| 텍스트 길이 | 77 |
+| Teacher 입력 크기 | SigLIP2 256 / PE-Core 448 |
+| Distillation 방식 | contrastive + affinity distill |
+| 배포 산출물 | `image_encoder.onnx`, `text_encoder.onnx` |
+| 디바이스 검증 | Qualcomm AI Hub compile/profile |
 
-## 🔬 Technical Details
+> 이 저장소는 측정 스크립트와 export/compile 경로를 제공합니다.
+> 실제 latency/메모리 수치는 export된 모델과 디바이스 job 결과로 별도 확인해야 합니다.
 
-자세한 기술 설명은 [PROJECT_GUIDE.md](./PROJECT_GUIDE.md)를 참조하세요:
-- 모델 아키텍처 상세
-- 학습 알고리즘 설명
-- 적용된 기술 및 논문 출처
-- 코드 단위 동작 설명 및 라이선스 검토
+---
 
-## 📚 References
+## Technical Details
 
-- [MobileCLIP2](https://github.com/apple/ml-mobileclip) - Apple ML Research (Student)
-- [SigLIP 2](https://arxiv.org/abs/2502.14786) - Google DeepMind (Teacher 1)
-- [Perception Encoder (PE)](https://arxiv.org/abs/2504.13181) - Meta FAIR (Teacher 2 paper)
-- [Perception Models (PE)](https://github.com/facebookresearch/perception_models) - Meta FAIR (Teacher 2)
-- [PE-Core-G14-448](https://huggingface.co/facebook/PE-Core-G14-448) - Hugging Face
-- [TinyCLIP](https://arxiv.org/abs/2309.12314) - Affinity Distillation
-- [OpenCLIP](https://github.com/mlfoundations/open_clip) - Model Loading Framework
+상세한 기술 설명은 [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md)를 참조하세요.
 
-## 📝 License
+주요 내용:
+- 데이터 파이프라인과 JSONL 계약
+- MobileCLIP2 학생 모델 래퍼 구조
+- Teacher 로딩과 adaptive distillation 로직
+- Offline teacher feature 검증 방식
+- 학습 / 평가 / export / QAI Hub 흐름
 
-This project is licensed under the MIT License.
+---
 
-- Full MIT text: [`LICENSE`](./LICENSE)
-- Third-party notices: [`THIRD_PARTY_LICENSES.md`](./THIRD_PARTY_LICENSES.md)
+## References
 
-### Third-Party Model Licenses
+- [MobileCLIP](https://github.com/apple/ml-mobileclip) — Apple ML Research
+- [SigLIP 2](https://github.com/google-research/big_vision/blob/main/big_vision/configs/proj/image_text/README_siglip2.md) — Google Research
+- [PE-Core / Perception Models](https://github.com/facebookresearch/perception_models) — Meta FAIR
+- [OpenCLIP](https://github.com/mlfoundations/open_clip) — MLFoundations
+- [TinyCLIP](https://arxiv.org/abs/2309.12314)
 
-| 구분 | 라이선스 | 비고 |
-|---|---|---|
-| **프로젝트 코드** | MIT | 본 저장소 코드 |
-| **MobileCLIP2 (Student)** | Code: MIT / Weights: Apple ML Research TOU | [모델 카드 확인](https://huggingface.co/apple/MobileCLIP2-S0) |
-| **SigLIP 2 Giant (Teacher 1)** | Apache 2.0 | [모델 카드 확인](https://huggingface.co/timm/ViT-gopt-16-SigLIP2-256) |
-| **PE-Core-bigG-14-448 (Teacher 2)** | Apache 2.0 | [모델 카드 확인](https://huggingface.co/facebook/PE-Core-G14-448), [PE 저장소](https://github.com/facebookresearch/perception_models) |
-| **OpenCLIP 프레임워크** | MIT | [저장소](https://github.com/mlfoundations/open_clip) |
+---
 
-> ⚠️ 모델 가중치/데이터셋은 MIT가 아닐 수 있습니다. 재배포/상업 사용 전 각 모델 카드와 데이터셋 이용약관을 반드시 재확인하세요.
+## License
 
-## 🙏 Acknowledgements
+프로젝트 코드는 MIT License를 따릅니다.
 
-- Apple for MobileCLIP2
-- Google DeepMind for SigLIP 2
-- Meta FAIR for Perception Encoder (PE)
-- LPCVC 2026 Organizers
+- 저장소 라이선스: [LICENSE](LICENSE)
+- 외부 구성요소: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
+
+> 모델 가중치와 데이터셋은 별도 라이선스를 가질 수 있습니다.
+> 재배포 또는 상업 사용 전 upstream 모델 카드와 데이터셋 약관을 반드시 재확인하세요.
+
+---
+
+## Acknowledgements
+
+- Apple ML Research
+- Google Research / DeepMind
+- Meta FAIR
+- OpenCLIP contributors
+- LPCVC 2026 organizers

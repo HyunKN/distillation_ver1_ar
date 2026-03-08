@@ -283,6 +283,18 @@ def train(cfg) -> str:
     adaptive_teacher_weight = bool(getattr(distill_cfg, "adaptive_teacher_weight", False))
     adaptive_teacher_tau = float(getattr(distill_cfg, "adaptive_teacher_tau", 0.07))
     adaptive_teacher_w_min = float(getattr(distill_cfg, "adaptive_teacher_w_min", 0.0))
+    static_teacher_weights = getattr(distill_cfg, "static_teacher_weights", None)
+    teacher_weight_mode = str(getattr(distill_cfg, "teacher_weight_mode", "static") or "static").lower()
+    if teacher_weight_mode not in {"static", "adaptive", "adaptive_source"}:
+        print(f"[Warn] Unknown teacher_weight_mode='{teacher_weight_mode}'. Fallback to 'static'.")
+        teacher_weight_mode = "static"
+    source_teacher_weights = getattr(distill_cfg, "source_teacher_weights", {}) or {}
+    if adaptive_teacher_weight and teacher_weight_mode == "static":
+        teacher_weight_mode = "adaptive_source" if source_teacher_weights else "adaptive"
+        print(
+            "[Config] adaptive_teacher_weight=True and teacher_weight_mode=static. "
+            f"Auto-switching to '{teacher_weight_mode}'."
+        )
 
     teacher = None
     offline_dir = distill_section.get('offline_feature_dir', None) if isinstance(distill_section, dict) else None
@@ -322,8 +334,13 @@ def train(cfg) -> str:
     )
     print(
         f"[Config] adaptive_teacher_weight={adaptive_teacher_weight}, "
-        f"tau={adaptive_teacher_tau:.4f}, w_min={adaptive_teacher_w_min:.4f}"
+        f"tau={adaptive_teacher_tau:.4f}, w_min={adaptive_teacher_w_min:.4f}, "
+        f"teacher_weight_mode={teacher_weight_mode}"
     )
+    if teacher_weight_mode == "static":
+        print(f"[Config] static_teacher_weights={static_teacher_weights}")
+    if teacher_weight_mode == "adaptive_source":
+        print(f"[Config] source_teacher_weights keys={sorted(source_teacher_weights.keys())}")
 
     # ---- [NEW] EMA 초기화 ----
     use_ema = bool(cfg.train.get("use_ema", True))
@@ -355,6 +372,7 @@ def train(cfg) -> str:
             offline_teacher_embs = batch_data[3] if len(batch_data) > 3 else None
 
             image_ids = torch.tensor([m['image_id'] for m in metas], device=device, dtype=torch.long)
+            sample_sources = [str(m.get("source", "unknown")) for m in metas]
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -408,14 +426,18 @@ def train(cfg) -> str:
                     student_txt=s_txt,
                     teacher_output=teacher_out,
                     teachers_cfg=distill_cfg.teachers,
+                    static_teacher_weights=static_teacher_weights,
                     affinity_temp=current_affinity_temp,
                     adaptive_teacher_weight=adaptive_teacher_weight,
                     adaptive_teacher_tau=adaptive_teacher_tau,
                     adaptive_teacher_w_min=adaptive_teacher_w_min,
+                    teacher_weight_mode=teacher_weight_mode,
+                    source_teacher_weights=source_teacher_weights,
                     affinity_columns=distill_cfg.affinity_columns,
                     distill_margin_thr=distill_cfg.distill_margin_thr,
                     selective=True,
                     image_ids=image_ids,
+                    sample_sources=sample_sources,
                 )
                 loss = loss + (w_distill_affinity * distill_loss_val)
 

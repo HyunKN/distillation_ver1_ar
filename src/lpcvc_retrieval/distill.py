@@ -9,18 +9,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 import open_clip
 
+# teacher 1개를 표현하는 설정 스키마
 @dataclass
 class TeacherConfig:
-    name: str = "ViT-B-32"
-    pretrained: str = "openai"
-    weight: float = 1.0
+    name: str
+    pretrained: str
     input_size: Optional[int] = None  # Force input size if needed
 
 @dataclass
 class DistillConfig:
     use_teacher: bool = False
     # List of teachers for ensemble distillation
-    teachers: List[TeacherConfig] = field(default_factory=lambda: [TeacherConfig()])
+    teachers: List[TeacherConfig] = field(default_factory=list)
+    static_teacher_weights: Optional[List[float]] = None
     
     # Legacy fields support (for backward compatibility if config uses old format)
     teacher_model_name: Optional[str] = None
@@ -35,6 +36,8 @@ class DistillConfig:
     adaptive_teacher_weight: bool = False
     adaptive_teacher_tau: float = 0.07
     adaptive_teacher_w_min: float = 0.0
+    teacher_weight_mode: str = "static"  # static | adaptive | adaptive_source
+    source_teacher_weights: Dict[str, Dict[str, float]] = field(default_factory=dict)
     affinity_columns: bool = False
     offline_feature_dir: Optional[str] = None
 
@@ -45,15 +48,33 @@ class DistillConfig:
             self.teachers = [TeacherConfig(
                 name=self.teacher_model_name,
                 pretrained=self.teacher_pretrained or "openai",
-                weight=1.0
             )]
             
         # Ensure teachers are TeacherConfig objects (if passed as dicts from yaml)
         if self.teachers:
-            self.teachers = [
-                TeacherConfig(**t) if isinstance(t, dict) else t 
-                for t in self.teachers
-            ]
+            normalized_teachers: List[TeacherConfig] = []
+            legacy_static_weights: List[float] = []
+
+            for t in self.teachers:
+                if isinstance(t, dict):
+                    t_cfg = dict(t)
+                    legacy_weight = t_cfg.pop("weight", None)
+                    normalized_teachers.append(TeacherConfig(**t_cfg))
+                    if legacy_weight is not None:
+                        legacy_static_weights.append(float(legacy_weight))
+                else:
+                    normalized_teachers.append(t)
+
+            self.teachers = normalized_teachers
+            if self.static_teacher_weights is None and len(legacy_static_weights) == len(self.teachers):
+                self.static_teacher_weights = legacy_static_weights
+
+        if self.static_teacher_weights is not None:
+            self.static_teacher_weights = [float(x) for x in self.static_teacher_weights]
+            if self.teachers and len(self.static_teacher_weights) != len(self.teachers):
+                raise ValueError(
+                    "distill.static_teacher_weights length must match distill.teachers length."
+                )
 
 
 class OpenClipTeacher(nn.Module):
@@ -182,16 +203,10 @@ class EnsembleTeacher(nn.Module):
     def __init__(self, teachers_cfg: List[TeacherConfig], device: str = "cuda"):
         super().__init__()
         self.teachers = nn.ModuleList()
-        self.weights = []
         
         for cfg in teachers_cfg:
             teacher = OpenClipTeacher(cfg, device=device)
             self.teachers.append(teacher)
-            self.weights.append(cfg.weight)
-            
-        # Normalize weights
-        total_w = sum(self.weights)
-        self.weights = [w / total_w for w in self.weights]
         
     @torch.no_grad()
     def forward(self, images: torch.Tensor, raw_texts: List[str]) -> List[Tuple[torch.Tensor, torch.Tensor]]:
@@ -205,6 +220,8 @@ class EnsembleTeacher(nn.Module):
 
 def create_teacher(cfg: DistillConfig, device: str = "cuda") -> nn.Module:
     """Factory for teacher(s)"""
+    if len(cfg.teachers) == 0:
+        raise ValueError("distill.use_teacher=True but no teachers are configured.")
     if len(cfg.teachers) == 1:
         return OpenClipTeacher(cfg.teachers[0], device=device)
     else:
@@ -222,31 +239,40 @@ def _margin_from_logits(logits: torch.Tensor) -> torch.Tensor:
     return top2[:, 0] - top2[:, 1]
 
 
-def _teacher_quality_margin(t_sim: torch.Tensor, image_ids: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+def _teacher_quality_margin_per_row(
+    t_sim: torch.Tensor,
+    image_ids: Optional[torch.Tensor],
+) -> Optional[torch.Tensor]:
     """
-    Batch-level teacher quality score:
-      margin = mean(sim positives) - mean(sim negatives)
+    Per-sample teacher quality score for retrieval.
+    Each row compares the mean positive similarity against the hardest negative.
     """
+    if t_sim.ndim != 2 or t_sim.size(0) != t_sim.size(1):
+        return None
+
     if image_ids is None:
-        return None
-
-    if not torch.is_tensor(image_ids):
-        image_ids = torch.as_tensor(image_ids, device=t_sim.device)
+        pos_mask = torch.eye(t_sim.size(0), device=t_sim.device, dtype=torch.bool)
     else:
-        image_ids = image_ids.to(device=t_sim.device)
+        if not torch.is_tensor(image_ids):
+            image_ids = torch.as_tensor(image_ids, device=t_sim.device)
+        else:
+            image_ids = image_ids.to(device=t_sim.device)
 
-    if image_ids.ndim != 1 or image_ids.numel() != t_sim.size(0):
-        return None
-
-    pos_mask = image_ids.unsqueeze(0).eq(image_ids.unsqueeze(1))
+        if image_ids.ndim != 1 or image_ids.numel() != t_sim.size(0):
+            return None
+        pos_mask = image_ids.unsqueeze(0).eq(image_ids.unsqueeze(1))
     neg_mask = ~pos_mask
-
-    pos_vals = t_sim[pos_mask]
-    neg_vals = t_sim[neg_mask]
-    if pos_vals.numel() == 0 or neg_vals.numel() == 0:
+    if not pos_mask.any() or not neg_mask.any():
         return None
 
-    return pos_vals.mean() - neg_vals.mean()
+    pos_count = pos_mask.sum(dim=1).clamp(min=1)
+    pos_mean = (t_sim * pos_mask.to(dtype=t_sim.dtype)).sum(dim=1) / pos_count.to(dtype=t_sim.dtype)
+
+    neg_filled = t_sim.masked_fill(~neg_mask, float("-inf"))
+    hardest_neg = neg_filled.max(dim=1).values
+    no_neg = ~neg_mask.any(dim=1)
+    hardest_neg = torch.where(no_neg, pos_mean, hardest_neg)
+    return pos_mean - hardest_neg
 
 
 def _normalize_static_weights(weights: List[float], device: torch.device) -> torch.Tensor:
@@ -258,6 +284,52 @@ def _normalize_static_weights(weights: List[float], device: torch.device) -> tor
     return w / s
 
 
+def _uniform_teacher_weights(num_teachers: int, device: torch.device) -> torch.Tensor:
+    num_teachers = max(1, int(num_teachers))
+    return torch.full((num_teachers,), 1.0 / float(num_teachers), device=device, dtype=torch.float32)
+
+
+def _resolve_source_prior_weights(
+    source: str,
+    teacher_names: List[str],
+    source_teacher_weights: Optional[Dict[str, Dict[str, float]]],
+    device: torch.device,
+) -> Optional[torch.Tensor]:
+    if not source_teacher_weights:
+        return None
+    source_cfg = source_teacher_weights.get(source)
+    if not isinstance(source_cfg, dict) or len(source_cfg) == 0:
+        return None
+    weights = [float(source_cfg.get(name, 0.0)) for name in teacher_names]
+    return _normalize_static_weights(weights, device=device)
+
+
+def _combine_teacher_weights(
+    prior_weights: Optional[torch.Tensor],
+    adaptive_weights: Optional[torch.Tensor],
+) -> torch.Tensor:
+    if adaptive_weights is None and prior_weights is None:
+        raise ValueError("At least one teacher weight source must be provided.")
+    if adaptive_weights is None:
+        if prior_weights.ndim == 1:
+            return prior_weights / prior_weights.sum().clamp(min=1e-12)
+        return _normalize_weight_matrix(prior_weights)
+    if prior_weights is None:
+        if adaptive_weights.ndim == 1:
+            return adaptive_weights / adaptive_weights.sum().clamp(min=1e-12)
+        return _normalize_weight_matrix(adaptive_weights)
+    if prior_weights.ndim == 1:
+        prior_weights = prior_weights.unsqueeze(1).expand_as(adaptive_weights)
+    if adaptive_weights.ndim == 1:
+        adaptive_weights = adaptive_weights.unsqueeze(1).expand_as(prior_weights)
+    mixed = prior_weights * adaptive_weights
+    return _normalize_weight_matrix(mixed)
+
+
+def _normalize_weight_matrix(weights: torch.Tensor) -> torch.Tensor:
+    return weights / weights.sum(dim=0, keepdim=True).clamp(min=1e-12)
+
+
 def _adaptive_weights_from_scores(
     scores: torch.Tensor,
     tau: float = 0.07,
@@ -265,24 +337,29 @@ def _adaptive_weights_from_scores(
 ) -> torch.Tensor:
     """
     Convert teacher quality scores into normalized mixing weights.
+    scores shape: [num_teachers, num_rows]
     """
-    if scores.numel() == 1:
+    if scores.ndim == 1:
+        scores = scores.unsqueeze(1)
+
+    if scores.size(0) == 1:
         return torch.ones_like(scores)
 
     tau = max(float(tau), 1e-6)
-    shifted = (scores / tau) - (scores / tau).max()
+    shifted = (scores / tau) - (scores / tau).max(dim=0, keepdim=True).values
     w = torch.softmax(shifted, dim=0)
 
     # Optional floor to avoid single-teacher collapse.
     n = int(w.numel())
     w_min = max(0.0, float(w_min))
     if w_min > 0.0:
-        if n * w_min >= 1.0:
-            w = torch.full_like(w, 1.0 / n)
+        num_teachers = int(w.size(0))
+        if num_teachers * w_min >= 1.0:
+            w = torch.full_like(w, 1.0 / num_teachers)
         else:
-            w = w * (1.0 - n * w_min) + w_min
+            w = w * (1.0 - num_teachers * w_min) + w_min
 
-    return w / w.sum().clamp(min=1e-12)
+    return _normalize_weight_matrix(w)
 
 
 def affinity_kl_rows(student_logits, teacher_logits, temp=0.1, row_mask=None):
@@ -295,19 +372,77 @@ def affinity_kl_rows(student_logits, teacher_logits, temp=0.1, row_mask=None):
     log_q = F.log_softmax(student_logits / temp, dim=1)
     return F.kl_div(log_q, p, reduction="batchmean")
 
+
+def affinity_kl_per_row(student_logits, teacher_logits, temp=0.1, row_mask=None):
+    if row_mask is not None:
+        student_logits = student_logits[row_mask]
+        teacher_logits = teacher_logits[row_mask]
+        if student_logits.numel() == 0:
+            return student_logits.new_zeros((0,), dtype=student_logits.dtype)
+
+    p = F.softmax(teacher_logits / temp, dim=1)
+    log_q = F.log_softmax(student_logits / temp, dim=1)
+    return F.kl_div(log_q, p, reduction="none").sum(dim=1)
+
+
+def _build_prior_weight_matrix(
+    static_weights: torch.Tensor,
+    teacher_names: List[str],
+    teacher_weight_mode: str,
+    source_teacher_weights: Optional[Dict[str, Dict[str, float]]],
+    sample_sources: Optional[List[str]],
+) -> torch.Tensor:
+    uniform_weights = _uniform_teacher_weights(len(teacher_names), static_weights.device)
+    num_rows = len(sample_sources) if sample_sources is not None else 0
+    if teacher_weight_mode == "static":
+        return static_weights.unsqueeze(1)
+    if teacher_weight_mode == "adaptive":
+        return uniform_weights.unsqueeze(1)
+    if num_rows <= 0:
+        return uniform_weights.unsqueeze(1)
+
+    priors = []
+    for src in sample_sources:
+        source_prior = _resolve_source_prior_weights(
+            source=str(src or "unknown"),
+            teacher_names=teacher_names,
+            source_teacher_weights=source_teacher_weights,
+            device=static_weights.device,
+        )
+        priors.append(source_prior if source_prior is not None else uniform_weights)
+    return torch.stack(priors, dim=1)
+
+
+def _weighted_row_loss(
+    teacher_weights: torch.Tensor,
+    teacher_losses: torch.Tensor,
+    row_mask: Optional[torch.Tensor],
+) -> torch.Tensor:
+    if row_mask is not None:
+        teacher_weights = teacher_weights[:, row_mask]
+        teacher_losses = teacher_losses[:, row_mask]
+    if teacher_losses.numel() == 0 or teacher_losses.size(1) == 0:
+        return teacher_losses.new_tensor(0.0)
+    blended = (teacher_weights * teacher_losses).sum(dim=0)
+    return blended.mean()
+
 def compute_affinity_distill_loss(
     student_img: torch.Tensor,
     student_txt: torch.Tensor,
     teacher_output: Union[Tuple[torch.Tensor, torch.Tensor], List[Tuple[torch.Tensor, torch.Tensor]]],
     teachers_cfg: Optional[List[TeacherConfig]] = None,
+    static_teacher_weights: Optional[List[float]] = None,
     affinity_temp: float = 0.1,
     adaptive_teacher_weight: bool = False,
     adaptive_teacher_tau: float = 0.07,
     adaptive_teacher_w_min: float = 0.0,
+    teacher_weight_mode: str = "static",
+    source_teacher_weights: Optional[Dict[str, Dict[str, float]]] = None,
     affinity_columns: bool = False,
     distill_margin_thr: float = 0.2,
     selective: bool = True,
     image_ids: Optional[torch.Tensor] = None,
+    sample_sources: Optional[List[str]] = None,
 ) -> torch.Tensor:
     """
     Computes distillation loss. Handles both Single Teacher and Ensemble Teacher.
@@ -324,28 +459,20 @@ def compute_affinity_distill_loss(
         t_sims = [t_img @ t_txt.t() for (t_img, t_txt) in teacher_output]
 
         if teachers_cfg and len(teachers_cfg) == len(teacher_output):
-            weights = [max(0.0, float(cfg.weight)) for cfg in teachers_cfg]
+            teacher_names = [str(cfg.name) for cfg in teachers_cfg]
+        else:
+            teacher_names = [f"teacher_{idx}" for idx in range(len(teacher_output))]
+
+        if static_teacher_weights is not None and len(static_teacher_weights) == len(teacher_output):
+            weights = static_teacher_weights
         else:
             weights = [1.0] * len(teacher_output)
-
         static_weights = _normalize_static_weights(weights, device=s_sim.device)
-        adaptive_weights = None
-        if adaptive_teacher_weight and len(teacher_output) > 1:
-            scores = []
-            for t_sim in t_sims:
-                score = _teacher_quality_margin(t_sim, image_ids)
-                if score is None:
-                    score = t_sim.new_tensor(0.0)
-                scores.append(score)
-            score_tensor = torch.stack(scores, dim=0)
-            if torch.isfinite(score_tensor).all():
-                adaptive_weights = _adaptive_weights_from_scores(
-                    score_tensor,
-                    tau=adaptive_teacher_tau,
-                    w_min=adaptive_teacher_w_min,
-                )
-
-        norm_weights = adaptive_weights if adaptive_weights is not None else static_weights
+        teacher_weight_mode = str(teacher_weight_mode or "static").lower()
+        if teacher_weight_mode not in {"static", "adaptive", "adaptive_source"}:
+            teacher_weight_mode = "static"
+        if adaptive_teacher_weight and teacher_weight_mode == "static":
+            teacher_weight_mode = "adaptive_source" if (source_teacher_weights and sample_sources) else "adaptive"
 
         row_mask = None
         col_mask = None
@@ -355,16 +482,63 @@ def compute_affinity_distill_loss(
             if affinity_columns:
                 margin_t = _margin_from_logits(s_sim.t())
                 col_mask = margin_t < distill_margin_thr
+        num_rows = s_sim.size(0)
+        if sample_sources is None or len(sample_sources) != num_rows:
+            sample_sources = ["unknown"] * num_rows
 
-        total_loss = s_sim.new_tensor(0.0)
-        for weight, t_sim in zip(norm_weights, t_sims):
+        prior_weight_matrix = _build_prior_weight_matrix(
+            static_weights=static_weights,
+            teacher_names=teacher_names,
+            teacher_weight_mode=teacher_weight_mode,
+            source_teacher_weights=source_teacher_weights,
+            sample_sources=sample_sources,
+        )
+        if prior_weight_matrix.size(1) == 1 and num_rows > 1:
+            prior_weight_matrix = prior_weight_matrix.expand(-1, num_rows)
 
-            loss = affinity_kl_rows(s_sim, t_sim, temp=affinity_temp, row_mask=row_mask)
+        row_teacher_weights = prior_weight_matrix
+        col_teacher_weights = prior_weight_matrix
+        if adaptive_teacher_weight and len(teacher_output) > 1:
+            row_scores = []
+            col_scores = []
+            for t_sim in t_sims:
+                row_score = _teacher_quality_margin_per_row(t_sim, image_ids)
+                col_score = _teacher_quality_margin_per_row(t_sim.t(), image_ids) if affinity_columns else None
+                if row_score is None:
+                    row_score = t_sim.new_zeros((num_rows,), dtype=t_sim.dtype)
+                if col_score is None and affinity_columns:
+                    col_score = t_sim.new_zeros((num_rows,), dtype=t_sim.dtype)
+                row_scores.append(torch.nan_to_num(row_score, nan=0.0, posinf=0.0, neginf=0.0))
+                if affinity_columns:
+                    col_scores.append(torch.nan_to_num(col_score, nan=0.0, posinf=0.0, neginf=0.0))
+
+            row_adaptive_weights = _adaptive_weights_from_scores(
+                torch.stack(row_scores, dim=0),
+                tau=adaptive_teacher_tau,
+                w_min=adaptive_teacher_w_min,
+            )
+            row_teacher_weights = _combine_teacher_weights(prior_weight_matrix, row_adaptive_weights)
 
             if affinity_columns:
-                loss += affinity_kl_rows(s_sim.t(), t_sim.t(), temp=affinity_temp, row_mask=col_mask)
+                col_adaptive_weights = _adaptive_weights_from_scores(
+                    torch.stack(col_scores, dim=0),
+                    tau=adaptive_teacher_tau,
+                    w_min=adaptive_teacher_w_min,
+                )
+                col_teacher_weights = _combine_teacher_weights(prior_weight_matrix, col_adaptive_weights)
 
-            total_loss += weight * loss
+        row_losses = torch.stack(
+            [affinity_kl_per_row(s_sim, t_sim, temp=affinity_temp) for t_sim in t_sims],
+            dim=0,
+        )
+        total_loss = _weighted_row_loss(row_teacher_weights, row_losses, row_mask=row_mask)
+
+        if affinity_columns:
+            col_losses = torch.stack(
+                [affinity_kl_per_row(s_sim.t(), t_sim.t(), temp=affinity_temp) for t_sim in t_sims],
+                dim=0,
+            )
+            total_loss = total_loss + _weighted_row_loss(col_teacher_weights, col_losses, row_mask=col_mask)
 
         return total_loss
 
@@ -412,5 +586,4 @@ def get_teacher_output(
             return teacher(imgs_teacher, raw_captions)
 
     return None
-
 
