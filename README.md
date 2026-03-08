@@ -1,17 +1,17 @@
-# MobileCLIP2 Retrieval Optimization
+﻿# MobileCLIP2 Retrieval Optimization
 
-> LPCVC 2026 Track 1 — MobileCLIP2 기반 이미지-텍스트 검색 경량 모델 학습 및 지식 증류
+> LPCVC 2026 Track 1 — MobileNetV4 Hybrid Large + EVA02-B-16 기반 이미지-텍스트 검색 경량 모델 학습 및 지식 증류
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch 2.0+](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 
 ## Overview
 
-Apple `MobileCLIP2-S0`를 학생 모델로, 두 개의 대형 teacher 모델로 지식 증류를 수행해 모바일 환경 이미지-텍스트 검색 모델을 학습합니다.
+현재 브랜치에서는 `MobileNetV4 Hybrid Large` 이미지 타워와 `EVA02-B-16` 텍스트 타워를 결합한 dual-tower 학생 모델을 사용해 모바일 환경 이미지-텍스트 검색 모델을 학습합니다.
 
 **핵심 사항**
-- **학생 모델**: `MobileCLIP2-S0` — 사전학습된 멀티모달 경량 모델 파인튜닝
+- **학생 모델**: `DualTowerStudent` — `MobileNetV4 Hybrid Large` image encoder + `EVA02-B-16` text encoder
 - **Teacher 모델**: `ViT-gopt-16-SigLIP2-256` + `PE-Core-bigG-14-448`
 - **Dual Distillation**: 배치/샘플 품질 기반 adaptive teacher weighting
 - **Offline Feature 모드**: teacher VRAM 없이 반복 실험 가능
@@ -46,11 +46,12 @@ Apple `MobileCLIP2-S0`를 학생 모델로, 두 개의 대형 teacher 모델로 
 │                                │                           │
 └────────────────────────────────┼───────────────────────────┘
                                  ▼
-                  ┌─────────────────────────────────┐
-                  │     MobileCLIP2-S0 Student      │
-                  │  image encoder + text encoder   │
-                  │   contrastive + distill losses  │
-                  └─────────────────────────────────┘
+                  ┌──────────────────────────────────────────┐
+                  │        Dual-Tower Student (current)      │
+                  │  Image: MobileNetV4 Hybrid Large         │
+                  │  Text : EVA02-B-16                       │
+                  │  contrastive + distill losses            │
+                  └──────────────────────────────────────────┘
                                  │
                    ┌─────────────┴─────────────┐
                    ▼                           ▼
@@ -60,12 +61,14 @@ Apple `MobileCLIP2-S0`를 학생 모델로, 두 개의 대형 teacher 모델로 
 
 ### 모델 및 구조 설명
 
-#### 1. 학생 모델 — MobileCLIP2-S0
+#### 1. 학생 모델 — Dual-Tower Student
 
-실제 배포 대상입니다. 이미지와 텍스트를 각각 임베딩으로 변환하고, 두 임베딩의 유사도로 검색을 수행합니다.
+실제 배포 대상입니다. 이미지 타워는 `MobileNetV4 Hybrid Large`, 텍스트 타워는 `EVA02-B-16`을 사용하며, 두 타워의 임베딩을 같은 `256`차원으로 투영한 뒤 유사도로 검색을 수행합니다.
 
-- 코드: `src/lpcvc_retrieval/mobileclip2.py`
+- 코드: `src/lpcvc_retrieval/dual_tower.py`
 - 팩토리: `src/lpcvc_retrieval/model.py`
+- 기본 이미지 입력 크기: `384 x 384`
+- 텍스트 길이: `77`
 - 기본 임베딩 차원: `256`
 
 #### 2. Teacher 모델 — SigLIP 2 + PE-Core
@@ -127,7 +130,6 @@ source .venv/bin/activate
 ```bash
 pip install -r requirements.txt
 pip install -e .
-pip install git+https://github.com/apple/ml-mobileclip.git
 ```
 
 > **참고** — `run_train.py`는 내부에서 `src/`를 추가하므로 바로 실행 가능합니다.
@@ -304,7 +306,23 @@ python compile_and_profile.py \
   --skip_profile
 ```
 
-입력 스펙: 이미지 `(1, 3, 224, 224)` float32 / 텍스트 `(1, 77)` int32
+입력 스펙: 이미지 `(1, 3, 384, 384)` float32 / 텍스트 `(1, 77)` int32
+
+---
+
+## Validation Snapshot
+
+2026-03-09 기준 현재 브랜치에서 아래 경로를 실제로 다시 확인했습니다.
+
+| 항목 | 결과 | 비고 |
+|------|------|------|
+| Small teacher feature extraction | 통과 | `ViT-B-32 (openai)` + `ViT-B-16 (openai)`로 재검증 |
+| Online teacher 학습 | 통과 | `runs/smoke_mnv4_eva02/recheck_train_online` |
+| Offline feature 학습 | 통과 | `runs/smoke_mnv4_eva02/recheck_train_offline` |
+| Evaluation | 통과 | COCO-style smoke evaluation |
+| ONNX split export | 통과 | `runs/smoke_mnv4_eva02/recheck_exported_onnx` |
+
+> AI Hub compile/profile는 제출 전 최종 산출물 기준으로 별도 확인하는 것이 좋습니다.
 
 ---
 
@@ -313,7 +331,7 @@ python compile_and_profile.py \
 ```text
 .
 ├── README.md                        # 실행 가이드 (이 파일)
-├── LICENSE                          # MIT License
+├── LICENSE                          # Apache-2.0 License
 ├── THIRD_PARTY_LICENSES.md          # 외부 모델/데이터 라이선스 정보
 ├── config.yaml                      # 학습 설정
 ├── pyproject.toml                   # 패키지 메타데이터
@@ -347,7 +365,8 @@ python compile_and_profile.py \
     ├── logger.py                    # 학습 로거
     ├── losses.py                    # 손실 함수 모음
     ├── metrics.py                   # Retrieval 평가 지표
-    ├── mobileclip2.py               # MobileCLIP2 학생 모델 래퍼
+    ├── dual_tower.py                # 현재 학생 모델 구현 (MobileNetV4 + EVA02)
+    ├── mobileclip2.py               # 기존 MobileCLIP2 구현
     ├── model.py                     # 모델 팩토리
     └── train.py                     # 학습 루프
 ```
@@ -363,7 +382,11 @@ python compile_and_profile.py \
 | `data.mode` | `jsonl` | 데이터 로더 모드 |
 | `data.batch_size` | `128` | 학습 배치 크기 |
 | `data.max_captions_per_image` | `5` | 캡션 샘플링 상한 |
-| `model.mobileclip2_variant` | `S0` | 학생 모델 variant |
+| `model.student_type` | `dual_tower` | 학생 모델 팩토리 선택 |
+| `model.image_model_name` | `mobilenetv4_hybrid_large.e600_r384_in1k` | 이미지 타워 |
+| `model.text_model_name` | `EVA02-B-16` | 텍스트 타워 |
+| `model.image_input_size` | `384` | 학생 이미지 입력 크기 |
+| `data.tokenizer_type` | `open_clip` | 현재 text tower와 맞는 토크나이저 선택 |
 | `model.embed_dim` | `256` | 최종 임베딩 차원 |
 | `distill.use_teacher` | `true` | Teacher distillation 사용 |
 | `distill.adaptive_teacher_weight` | `true` | 동적 가중치 활성화 |
@@ -384,7 +407,7 @@ python compile_and_profile.py \
 |------|----------------|
 | 주 평가 지표 | I2T / T2I Recall@1, 5, 10 |
 | Best checkpoint 선정 | I2T R@10 |
-| 학생 입력 해상도 | 224 x 224 |
+| 학생 입력 해상도 | 384 x 384 |
 | 텍스트 길이 | 77 |
 | Teacher 입력 크기 | SigLIP2 256 / PE-Core 448 |
 | Distillation 방식 | contrastive + affinity distill |
@@ -402,7 +425,7 @@ python compile_and_profile.py \
 
 주요 내용:
 - 데이터 파이프라인과 JSONL 계약
-- MobileCLIP2 학생 모델 래퍼 구조
+- Dual-tower 학생 모델 구조 (`MobileNetV4 Hybrid Large` + `EVA02-B-16`)
 - Teacher 로딩과 adaptive distillation 로직
 - Offline teacher feature 검증 방식
 - 학습 / 평가 / export / QAI Hub 흐름
@@ -411,7 +434,8 @@ python compile_and_profile.py \
 
 ## References
 
-- [MobileCLIP](https://github.com/apple/ml-mobileclip) — Apple ML Research
+- [MobileNetV4](https://arxiv.org/abs/2404.10518) — Google Research / TensorFlow Models
+- [EVA-CLIP](https://huggingface.co/QuanSun/EVA-CLIP) — BAAI / OpenCLIP ecosystem
 - [SigLIP 2](https://github.com/google-research/big_vision/blob/main/big_vision/configs/proj/image_text/README_siglip2.md) — Google Research
 - [PE-Core / Perception Models](https://github.com/facebookresearch/perception_models) — Meta FAIR
 - [OpenCLIP](https://github.com/mlfoundations/open_clip) — MLFoundations
@@ -421,19 +445,19 @@ python compile_and_profile.py \
 
 ## License
 
-프로젝트 코드는 MIT License를 따릅니다.
+프로젝트 코드는 Apache License 2.0을 따릅니다.
 
 - 저장소 라이선스: [LICENSE](LICENSE)
 - 외부 구성요소: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
 
-> 모델 가중치와 데이터셋은 별도 라이선스를 가질 수 있습니다.
+> 외부 모델 가중치와 데이터셋은 별도 라이선스를 가질 수 있습니다.
 > 재배포 또는 상업 사용 전 upstream 모델 카드와 데이터셋 약관을 반드시 재확인하세요.
 
 ---
 
 ## Acknowledgements
 
-- Apple ML Research
+- Ross Wightman / timm
 - Google Research / DeepMind
 - Meta FAIR
 - OpenCLIP contributors

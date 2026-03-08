@@ -7,9 +7,9 @@ from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
 from .config import resolve_device
+from .model import create_model_from_config
 from .data import build_tokenizer, make_datasets, collate_fn
 from .distill import DistillConfig, compute_affinity_distill_loss
-from .mobileclip2 import MobileCLIP2Student  # Apple MobileCLIP2 Student Model
 # Loss 함수 import
 from .losses import (
     pairwise_ranking_loss, 
@@ -53,7 +53,7 @@ def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps: int, num_traini
     return LambdaLR(optimizer, lr_lambda)
 
 @torch.no_grad()
-def evaluate(model: MobileCLIP2Student, loader: DataLoader, device: str, use_bidirectional: bool = True, use_coco_eval: bool = True):
+def evaluate(model: torch.nn.Module, loader: DataLoader, device: str, use_bidirectional: bool = True, use_coco_eval: bool = True):
     """
     Evaluate model on retrieval metrics.
     
@@ -154,23 +154,20 @@ def train(cfg) -> str:
     out_dir = str(cfg.output.get("out_dir", "runs/lpcvc_clip_lite"))
     os.makedirs(out_dir, exist_ok=True)
 
-    tokenizer = build_tokenizer()
-    vocab_size = int(tokenizer.vocab_size)
-    eos_id = int(tokenizer.eos_token_id)
+    tokenizer = build_tokenizer(cfg)
+    vocab_size = int(getattr(tokenizer, "vocab_size", 0) or 0)
+    eos_id = int(getattr(tokenizer, "eos_token_id", 0) or 0)
 
-    # ---- model: MobileCLIP2 Student ----
-    embed_dim = int(cfg.model.get("embed_dim", 256))
-    variant = str(cfg.model.get("mobileclip2_variant", "S4"))
-    freeze_backbone = bool(cfg.model.get("freeze_backbone", False))
-    checkpoint_path = cfg.model.get("checkpoint_path", None)
-    
-    model = MobileCLIP2Student(
-        variant=variant,
-        embed_dim=embed_dim,
-        freeze_backbone=freeze_backbone,
-        checkpoint_path=checkpoint_path,
-    ).to(device)
-    print(f"[Model] MobileCLIP2-{variant} (embed_dim={embed_dim}, freeze={freeze_backbone})")
+    model = create_model_from_config(cfg, vocab_size=vocab_size, eos_id=eos_id).to(device)
+    student_type = str(cfg.model.get("student_type", "mobileclip2")).lower()
+    if student_type == "mobileclip2":
+        variant = str(cfg.model.get("mobileclip2_variant", "S4"))
+        print(f"[Model] MobileCLIP2-{variant} (embed_dim={int(cfg.model.get('embed_dim', 256))})")
+    else:
+        print(
+            f"[Model] DualTower(image={cfg.model.get('image_model_name')}, "
+            f"text={cfg.model.get('text_model_name')}, embed_dim={int(cfg.model.get('embed_dim', 256))})"
+        )
 
     # ---- [OPTIONAL] torch.compile (PyTorch 2.x 학습 가속) ----
     use_compile = bool(cfg.train.get("use_compile", False))

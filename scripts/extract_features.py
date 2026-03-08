@@ -146,7 +146,7 @@ def main():
         cfg_dict.setdefault("distill", {})["offline_feature_dir"] = None
     elif isinstance(cfg, dict):
         cfg.setdefault("distill", {})["offline_feature_dir"] = None
-    tokenizer = build_tokenizer()
+    tokenizer = build_tokenizer(cfg)
     train_ds, val_ds = make_datasets(cfg, tokenizer)
 
     batch_size = args.batch_size or int(cfg.data.get("batch_size", 64))

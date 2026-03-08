@@ -62,11 +62,17 @@ def main():
     else:
         device_info = "CPU"
     
+    student_type = str(cfg.model.get("student_type", "mobileclip2")).lower()
     print("=" * 60)
     print("  MobileCLIP2-Retrieval-Optimization Training")
     print("=" * 60)
     print(f"  Device: {device_info}")
-    print(f"  MobileCLIP2 Variant: {cfg.model.mobileclip2_variant}")
+    print(f"  Student Type: {student_type}")
+    if student_type == "mobileclip2":
+        print(f"  MobileCLIP2 Variant: {cfg.model.mobileclip2_variant}")
+    else:
+        print(f"  Image Tower: {cfg.model.image_model_name}")
+        print(f"  Text Tower: {cfg.model.text_model_name}")
     print(f"  Epochs: {cfg.train.epochs}")
     print(f"  Batch Size: {cfg.data.batch_size}")
     print(f"  Learning Rate: {cfg.train.lr}")

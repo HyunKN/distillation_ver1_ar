@@ -20,7 +20,7 @@ def main():
     args = ap.parse_args()
 
     cfg = load_config(args.config, overrides=args.override)
-    tok = build_tokenizer()
+    tok = build_tokenizer(cfg)
 
     model = create_model_from_config(cfg, tok.vocab_size, tok.eos_token_id)
 

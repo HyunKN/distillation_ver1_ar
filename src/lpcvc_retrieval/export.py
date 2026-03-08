@@ -10,7 +10,8 @@ from .model import OnnxWrapper
 def export_onnx(model: torch.nn.Module, onnx_path: str, opset: int = 17):
     model.eval()
     wrapper = OnnxWrapper(model)
-    dummy_img = torch.zeros(1, 3, 224, 224, dtype=torch.float32)
+    image_size = int(getattr(model, "image_input_size", 224))
+    dummy_img = torch.zeros(1, 3, image_size, image_size, dtype=torch.float32)
     dummy_txt = torch.zeros(1, 77, dtype=torch.int32)
     os.makedirs(os.path.dirname(onnx_path) or ".", exist_ok=True)
     torch.onnx.export(
@@ -62,7 +63,8 @@ def export_onnx_split(
     os.makedirs(out_dir, exist_ok=True)
     model.eval()
 
-    dummy_img = torch.rand(1, 3, 224, 224, dtype=torch.float32)
+    image_size = int(getattr(model, "image_input_size", 224))
+    dummy_img = torch.rand(1, 3, image_size, image_size, dtype=torch.float32)
     dummy_txt = torch.zeros(1, 77, dtype=torch.int32)
 
     image_onnx_path = os.path.join(out_dir, img_name)

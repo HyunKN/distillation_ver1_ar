@@ -20,7 +20,7 @@ def main():
     cfg = load_config(args.config, overrides=args.override)
     device = resolve_device(cfg.get("device", "auto"))
 
-    tok = build_tokenizer()
+    tok = build_tokenizer(cfg)
     
     # Use factory function
     model = create_model_from_config(cfg, tok.vocab_size, tok.eos_token_id)

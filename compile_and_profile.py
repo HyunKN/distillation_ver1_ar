@@ -35,6 +35,20 @@ def run_profile(compiled_model, device, name):
     print(f"  Profile job ID: {profile_job.job_id}")
     return profile_job
 
+def infer_input_spec(onnx_model):
+    """Infer a static QAI Hub input spec from an ONNX model."""
+    tensor = onnx_model.graph.input[0]
+    shape = []
+    for dim in tensor.type.tensor_type.shape.dim:
+        if dim.dim_value > 0:
+            shape.append(int(dim.dim_value))
+        else:
+            shape.append(1)
+    elem_type = tensor.type.tensor_type.elem_type
+    if elem_type == onnx.TensorProto.INT32:
+        return {tensor.name: (tuple(shape), "int32")}
+    return {tensor.name: tuple(shape)}
+
 def main():
     ap = argparse.ArgumentParser(description="Compile and profile ONNX models on QAI Hub")
     ap.add_argument("--onnx_dir", default="exported_onnx", help="Directory containing ONNX files")
@@ -79,19 +93,21 @@ def main():
     # Target device
     device = qai_hub.Device(args.device)
     print(f"\n🎯 Target device: {args.device}")
+    img_input_spec = infer_input_spec(onnx_img)
+    txt_input_spec = infer_input_spec(onnx_txt)
 
     # Compile models
     print(f"\n🔧 Compiling models...")
     img_compile_job = compile_model(
         model=onnx_img,
         device=device,
-        input_specs={"image": (1, 3, 224, 224)},
+        input_specs=img_input_spec,
         name="Image Encoder"
     )
     txt_compile_job = compile_model(
         model=onnx_txt,
         device=device,
-        input_specs={"text": ((1, 77), "int32")},
+        input_specs=txt_input_spec,
         name="Text Encoder"
     )
 

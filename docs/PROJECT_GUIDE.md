@@ -1,4 +1,4 @@
-# MobileCLIP2 Retrieval Optimization — 프로젝트 가이드
+﻿# MobileCLIP2 Retrieval Optimization — 프로젝트 가이드
 
 > 최종 갱신: 2026-03-09  
 > 이 문서는 현재 저장소 코드를 기준으로 프로젝트의 목적, 구조, 동작 원리, 모든 모듈의 상세 설명을 기록합니다.
@@ -11,7 +11,7 @@
 
 LPCVC 2026 Track 1 — 모바일 환경에서 이미지-텍스트 검색(Image-Text Retrieval)을 수행하는 경량 모델을 학습합니다.
 
-**핵심 전략**: Apple의 사전학습된 `MobileCLIP2-S0`(학생)을 두 개의 대형 teacher 모델(`SigLIP 2 Giant`, `PE-Core bigG-14-448`)로부터 지식 증류(Knowledge Distillation)하여, 모바일 디바이스에서도 높은 retrieval 성능을 달성합니다.
+**핵심 전략**: `MobileNetV4 Hybrid Large` 이미지 타워와 `EVA02-B-16` 텍스트 타워로 구성된 dual-tower 학생 모델을 두 개의 대형 teacher 모델(`SigLIP 2 Giant`, `PE-Core bigG-14-448`)로부터 지식 증류하여, 모바일 디바이스에서도 높은 retrieval 성능을 달성합니다.
 
 ### 1.2 대회 정보
 
@@ -24,7 +24,7 @@ LPCVC 2026 Track 1 — 모바일 환경에서 이미지-텍스트 검색(Image-T
 
 | 결정 | 근거 |
 |------|------|
-| MobileCLIP2-S0 학생 | 모바일 최적화된 사전학습 멀티모달 모델 (Apple, MIT) |
+| Dual-tower 학생 (`MobileNetV4 Hybrid Large` + `EVA02-B-16`) | 이미지/텍스트 타워를 분리하여 현재 대회 규격과 XR2 레이턴시 요구를 동시에 맞춤 |
 | SigLIP 2 + PE-Core 듀얼 teacher | 서로 다른 강점(정렬 vs 강건성)을 보완 |
 | Adaptive teacher weighting (기본값) | 고정 비율보다 데이터 적응적 mixing이 안전 |
 | Offline feature 모드 지원 | teacher VRAM 0으로 반복 실험 가능 |
@@ -59,24 +59,21 @@ LPCVC 2026 Track 1 — 모바일 환경에서 이미지-텍스트 검색(Image-T
 
 ## 3. 모델 아키텍처
 
-### 3.1 학생 모델 — MobileCLIP2-S0
+### 3.1 학생 모델 — DualTowerStudent
 
 | 항목 | 값 |
 |------|-----|
-| 모델 | MobileCLIP2-S0 |
-| 출처 | [Apple ML Research](https://github.com/apple/ml-mobileclip) |
-| HuggingFace | [apple/MobileCLIP2-S0](https://huggingface.co/apple/MobileCLIP2-S0) |
-| 코드 라이선스 | MIT |
-| 가중치 라이선스 | Apple model card terms |
-| 사전학습 | `dfndr2b` (DataFilterNetworks Balanced) |
-| 이미지 입력 | `(B, 3, 224, 224)` float32, [0, 1] 범위 |
+| 모델 | `DualTowerStudent` (`MobileNetV4 Hybrid Large` + `EVA02-B-16`) |
+| 이미지 타워 출처 | [timm/mobilenetv4_hybrid_large.e600_r384_in1k](https://huggingface.co/timm/mobilenetv4_hybrid_large.e600_r384_in1k) |
+| 텍스트 타워 출처 | [QuanSun/EVA-CLIP](https://huggingface.co/QuanSun/EVA-CLIP) |
+| 저장소 코드 라이선스 | Apache-2.0 |
+| 이미지 입력 | `(B, 3, 384, 384)` float32, [0, 1] 범위 |
 | 텍스트 입력 | `(B, 77)` int32 token IDs |
+| 토크나이저 | `open_clip.get_tokenizer("EVA02-B-16")` 기반 `OpenClipTokenizerAdapter` |
 | 기본 임베딩 차원 | 256 |
 | 출력 | L2 normalized 임베딩 |
 
-**Variant 지원**: S0, S2, S3, S4, B, L-14 (현재 기본값: S0)
-
-학생 모델이 원본 출력 차원과 설정 `embed_dim`이 다르면 **projection layer** (`nn.Linear`)가 자동 추가됩니다.
+학생 모델은 timm 이미지 백본과 open_clip 텍스트 백본을 결합합니다. 두 타워 출력 차원이 `embed_dim`과 다르면 projection layer를 자동 추가합니다.
 
 ### 3.2 Teacher 모델
 
@@ -139,26 +136,32 @@ LPCVC 2026 Track 1 — 모바일 환경에서 이미지-텍스트 검색(Image-T
 
 ### 4.3 토크나이저
 
+현재 기본 경로는 `build_tokenizer(cfg)`를 통해 `data.tokenizer_type=open_clip`일 때 `OpenClipTokenizerAdapter`를 생성하는 방식입니다.
+
 ```python
-CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+build_tokenizer(cfg)  # 현재 기본값: open_clip tokenizer for EVA02-B-16
 ```
 
-- 출처: [HuggingFace transformers](https://huggingface.co/openai/clip-vit-base-patch32)
-- `max_length=77`, `padding="max_length"`, `truncation=True`
-- 출력은 `int32`로 변환
+- 구현 위치: `src/lpcvc_retrieval/data.py`
+- 실제 호출: `open_clip.get_tokenizer("EVA02-B-16")`
+- 출력 길이: `77`
+- 출력 dtype: `int32`
+- 현재 브랜치 smoke test에서도 `(B, 77)` token shape를 확인함
 
+즉, 현재 학생 모델의 텍스트 입력은 Hugging Face `CLIPTokenizer`가 아니라 `open_clip` 토크나이저 어댑터를 통해 생성됩니다.
 ### 4.4 데이터 증강
 
-`_img_transform_train(augment=True)`가 적용하는 증강:
+`_img_transform_train(image_size, augment)`가 적용하는 증강:
 
-| 증강 | 파라미터 | 효과 |
-|------|----------|------|
-| `RandomResizedCrop` | scale=(0.8, 1.0), 224px | 부분 물체 인식 강제 |
-| `RandomHorizontalFlip` | p=0.5 | 실효 데이터셋 2배 |
-| `ColorJitter` | brightness=0.2, contrast=0.2, saturation=0.1 | 조명 강건성 |
+| 증강 | 현재 기본값 | 효과 |
+|------|-------------|------|
+| `RandomResizedCrop` | scale=(0.8, 1.0), `384px` | 부분 물체 인식 강제 |
+| `RandomHorizontalFlip` | p=0.5 | 좌우 반전 강건성 |
+| `ColorJitter` | brightness=0.2, contrast=0.2, saturation=0.1 | 조명/색 변화 강건성 |
 
-평가 시에는 `Resize(224) → CenterCrop(224) → ToTensor()` 만 적용합니다.
+평가 시에는 현재 기본 설정 기준 `Resize(384) → CenterCrop(384) → ToTensor()` 만 적용합니다.
 
+중요한 점은, transform 해상도가 하드코딩된 것이 아니라 `model.image_input_size`를 통해 결정된다는 것입니다. 현재 브랜치 기본값은 `384`입니다.
 ### 4.5 데이터셋 클래스
 
 #### `JsonlRetrievalDataset`
@@ -267,12 +270,16 @@ data:
   train_augment: true
 
 model:
-  mobileclip2_variant: S0              # S0 | S2 | S3 | S4 | B | L-14
+  student_type: dual_tower             # 현재 기본 student 구현
+  image_model_name: mobilenetv4_hybrid_large.e600_r384_in1k
+  image_pretrained: true
+  image_input_size: 384
+  freeze_image_backbone: false
+  text_model_name: EVA02-B-16
+  text_pretrained: merged2b_s8b_b131k
+  freeze_text_backbone: false
   embed_dim: 256                       # 최종 임베딩 벡터 차원
-  checkpoint_path: null                # null이면 auto-download
-  freeze_backbone: false               # backbone 동결 여부
-  # temperature_init: 0.07             # config에 존재하지만 코드에서 미사용
-  # 실제 logit_scale 초기값은 mobileclip2.py에서 log(1/0.07)로 하드코딩
+  temperature_init: 0.07
   logit_scale_min: -4.6
   logit_scale_max: 4.6
 
@@ -339,38 +346,40 @@ device: cuda
 
 ## 6. 학생 모델 상세
 
-> 코드: `src/lpcvc_retrieval/mobileclip2.py`, `src/lpcvc_retrieval/model.py`
+> 코드: `src/lpcvc_retrieval/dual_tower.py`, `src/lpcvc_retrieval/model.py`
 
-### 6.1 MobileCLIP2Student 클래스
+### 6.1 DualTowerStudent 클래스
 
 | 메서드 | 시그니처 | 동작 |
 |--------|----------|------|
-| `__init__` | `(variant, embed_dim, freeze_backbone, checkpoint_path)` | 모델 로드 + projection 설정 |
-| `_load_model` | `()` | `open_clip` 로드 → reparameterize → projection 추가 |
-| `encode_image` | `(images) → [B, D]` | 이미지 인코딩 + projection + L2 normalize |
-| `encode_text` | `(input_ids) → [B, D]` | 텍스트 인코딩 + projection + L2 normalize |
-| `forward` | `(images, text_input) → (img_emb, txt_emb)` | 양쪽 동시 인코딩 |
-| `get_tokenizer` | `() → tokenizer` | open_clip 토크나이저 반환 |
+| `__init__` | `(image_model_name, text_model_name, embed_dim, image_pretrained, text_pretrained, freeze_image_backbone, freeze_text_backbone, image_input_size)` | 이미지/텍스트 타워 로드 + projection 설정 |
+| `_infer_image_output_dim` | `() -> int` | dummy input으로 이미지 타워 출력 차원 추론 |
+| `_infer_text_output_dim` | `() -> int` | tokenizer + `encode_text`로 텍스트 타워 출력 차원 추론 |
+| `_prepare_image_input` | `(images) -> images` | 입력을 `image_input_size`로 resize하고 timm mean/std로 normalize |
+| `encode_image` | `(images) -> [B, D]` | 이미지 인코딩 + projection + L2 normalize |
+| `encode_text` | `(input_ids) -> [B, D]` | 텍스트 인코딩 + projection + L2 normalize |
+| `forward` | `(images, text_input) -> (img_emb, txt_emb)` | 양쪽 동시 인코딩 |
+| `get_tokenizer` | `() -> tokenizer` | open_clip tokenizer 반환 |
 
-**학습 가능 파라미터**:
-- `logit_scale`: `nn.Parameter(log(1/0.07))` — 대조 학습 temperature
-- `logit_bias`: `nn.Parameter(0.0)` — SigLIP loss에서 사용하는 bias
+현재 구현은 다음과 같이 동작합니다.
 
-**reparameterize**: `mobileclip.modules.common.mobileone.reparameterize_model()` — MobileCLIP2는 학습 시 multi-branch 구조를 사용하고, 추론 시 단일 branch로 합칩니다.
+1. 이미지 타워는 `timm.create_model(..., num_classes=0, global_pool="avg")`로 로드합니다.
+2. 텍스트 타워는 `open_clip.create_model("EVA02-B-16", pretrained="merged2b_s8b_b131k")`로 로드합니다.
+3. 이미지 전처리 통계는 `timm.data.resolve_model_data_config()`에서 읽어옵니다.
+4. 이미지/텍스트 출력 차원이 최종 `embed_dim=256`과 다르면 `nn.Linear(..., bias=False)` projection을 자동 추가합니다.
+5. `logit_scale`과 `logit_bias`는 기존 retrieval loss 흐름과 호환되도록 학생 모델 내부에 유지합니다.
 
 ### 6.2 create_model_from_config
 
 ```python
-def create_model_from_config(cfg, vocab_size=None, eos_id=None) -> MobileCLIP2Student
+def create_model_from_config(cfg, vocab_size=None, eos_id=None) -> nn.Module
 ```
 
-Config에서 `mobileclip2_variant`, `embed_dim`, `freeze_backbone`, `checkpoint_path`를 읽어 모델을 생성합니다. `vocab_size`와 `eos_id`는 하위 호환을 위해 파라미터로 남아 있지만 사용되지 않습니다.
+현재 기본값은 `cfg.model.student_type=dual_tower`이며, 이에 따라 `DualTowerStudent`를 생성합니다. 팩토리는 `student_type` 값에 따라 분기하며, 현재 브랜치의 기본 student는 `dual_tower`입니다.
 
 ### 6.3 OnnxWrapper
 
-ONNX export를 위한 래퍼입니다. `(image, text_input) → (img_emb, txt_emb)` 인터페이스를 제공합니다.
-
----
+ONNX export를 위한 래퍼입니다. `(image, text_input) -> (img_emb, txt_emb)` 인터페이스를 제공합니다.
 
 ## 7. Teacher 및 Distillation
 
@@ -633,7 +642,7 @@ coco_bidirectional_recall(unique_image_emb, text_emb, unique_image_ids, text_ima
 ```text
 1. Device 결정
 2. Seed 설정
-3. MobileCLIP2Student 생성 → (선택) torch.compile
+3. DualTowerStudent 생성 → (선택) torch.compile
 4. WandB 로거 초기화
 5. 데이터셋/로더 생성
 6. Optimizer (AdamW) + Scheduler (warmup + cosine) 생성
@@ -758,7 +767,7 @@ WandB와 print()를 통합하는 선택적 로거입니다.
 
 | 출력 파일 | 입력 | 출력 |
 |----------|------|------|
-| `image_encoder.onnx` | `image` float32 `(1,3,224,224)` | `embedding` float32 `(1,D)` |
+| `image_encoder.onnx` | `image` float32 `(1,3,384,384)` | `embedding` float32 `(1,D)` |
 | `text_encoder.onnx` | `text` int32 `(1,77)` | `embedding` float32 `(1,D)` |
 
 - `opset`: 기본 18
@@ -779,7 +788,7 @@ python scripts/export_onnx_split.py --config config.yaml --ckpt best.pt --out_di
 
 #### `compile_model(model, device, input_specs, name)`
 
-`qai_hub.submit_compile_job()`으로 ONNX를 QNN DLC로 컴파일합니다.
+`qai_hub.submit_compile_job()`으로 ONNX를 QNN DLC로 컴파일합니다. 현재 스크립트는 ONNX 입력 텐서를 읽어 input spec을 자동 추론합니다.
 - `--target_runtime qnn_dlc --truncate_64bit_io`
 
 #### `run_profile(compiled_model, device, name)`
@@ -846,7 +855,7 @@ fingerprint = hasher.hexdigest()
 
 - `src/`를 `sys.path`에 추가 → `PYTHONPATH=src` 없이 실행 가능
 - `--config`, `--override` 인자 처리
-- 디바이스 정보, 모델 variant, 에폭 등을 배너로 출력
+- 디바이스 정보, 현재 학생 모델 정보, 에폭 등을 배너로 출력
 - `train(cfg)` 호출
 
 ### 15.2 `scripts/eval.py` (98줄)
@@ -872,7 +881,7 @@ Offline teacher feature 추출. 14장 참조.
 ```text
 .
 ├── README.md                        # 실행 가이드
-├── LICENSE                          # MIT License
+├── LICENSE                          # Apache-2.0 License
 ├── THIRD_PARTY_LICENSES.md          # 외부 모델/데이터 라이선스 정보
 ├── config.yaml                      # 학습 설정
 ├── pyproject.toml                   # 패키지 메타 (setuptools, src layout)
@@ -903,7 +912,8 @@ Offline teacher feature 추출. 14장 참조.
     ├── logger.py                    # WandB 로거
     ├── losses.py                    # SigLIP, ranking, hard-neg, text-text
     ├── metrics.py                   # Recall@K, COCO-style 평가
-    ├── mobileclip2.py               # MobileCLIP2 학생 래퍼
+    ├── dual_tower.py               # 현재 학생 모델 구현
+    ├── mobileclip2.py               # 기존 MobileCLIP2 구현
     ├── model.py                     # 모델 팩토리, OnnxWrapper
     └── train.py                     # 학습 루프, evaluate, scheduler
 ```
@@ -914,18 +924,18 @@ Offline teacher feature 추출. 14장 참조.
 
 ### 17.1 저장소 라이선스
 
-이 저장소의 코드는 **MIT License**입니다 (`LICENSE` 파일).
+이 저장소의 코드는 **Apache License 2.0**입니다 (`LICENSE` 파일).
 
 ### 17.2 모델 및 프레임워크
 
 | 구성요소 | 출처 | 라이선스 |
 |----------|------|---------|
-| MobileCLIP2 코드 | [apple/ml-mobileclip](https://github.com/apple/ml-mobileclip) | MIT |
-| MobileCLIP2 가중치 | [apple/MobileCLIP2-S0](https://huggingface.co/apple/MobileCLIP2-S0) | Apple model card terms |
+| MobileNetV4 image student | [timm/mobilenetv4_hybrid_large.e600_r384_in1k](https://huggingface.co/timm/mobilenetv4_hybrid_large.e600_r384_in1k) | Apache-2.0 |
+| EVA-CLIP text student | [QuanSun/EVA-CLIP](https://huggingface.co/QuanSun/EVA-CLIP) | MIT |
 | SigLIP2 teacher | [timm/ViT-gopt-16-SigLIP2-256](https://huggingface.co/timm/ViT-gopt-16-SigLIP2-256) | Apache-2.0 |
 | PE-Core teacher | [facebook/PE-Core-G14-448](https://huggingface.co/facebook/PE-Core-G14-448) | Apache-2.0 |
+| timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | Apache-2.0 |
 | OpenCLIP | [mlfoundations/open_clip](https://github.com/mlfoundations/open_clip) | MIT |
-| CLIP Tokenizer | [openai/clip-vit-base-patch32](https://huggingface.co/openai/clip-vit-base-patch32) | MIT |
 
 ### 17.3 데이터셋
 
@@ -940,6 +950,8 @@ Offline teacher feature 추출. 14장 참조.
 
 | 기법 | 논문/출처 |
 |------|----------|
+| MobileNetV4 | [MobileNetV4: Universal Models for the Mobile Ecosystem](https://arxiv.org/abs/2404.10518) |
+| EVA-CLIP | [EVA-CLIP model card](https://huggingface.co/QuanSun/EVA-CLIP) |
 | SigLIP Loss | [Sigmoid Loss for Language Image Pre-Training](https://arxiv.org/abs/2303.15343) |
 | Hard Negative Mining | [BLIP](https://arxiv.org/abs/2201.12086), [FG-CLIP](https://arxiv.org/abs/2405.11510) |
 | Text-Text Contrastive | [TULIP](https://arxiv.org/abs/2406.06512) |
@@ -948,9 +960,6 @@ Offline teacher feature 추출. 14장 참조.
 | Cosine LR Schedule | [SGDR](https://arxiv.org/abs/1608.03983) |
 
 > 재배포 또는 상업 사용 전 각 모델 카드와 데이터셋 약관을 반드시 재확인하세요.
-
----
-
 ## 18. 코드 읽기 추천 순서
 
 처음 읽는다면 아래 순서가 가장 빠릅니다:
@@ -958,7 +967,7 @@ Offline teacher feature 추출. 14장 참조.
 1. `run_train.py` — 엔트리포인트, 전체 파이프라인 개요
 2. `src/lpcvc_retrieval/train.py` — 학습 루프 전체
 3. `src/lpcvc_retrieval/data.py` — 데이터 파이프라인
-4. `src/lpcvc_retrieval/mobileclip2.py` — 학생 모델
+4. `src/lpcvc_retrieval/dual_tower.py` — 현재 학생 모델
 5. `src/lpcvc_retrieval/distill.py` — teacher + distillation 핵심
 6. `src/lpcvc_retrieval/losses.py` — 손실 함수 모음
 7. `src/lpcvc_retrieval/metrics.py` — 평가 지표
@@ -984,3 +993,4 @@ Offline teacher feature 추출. 14장 참조.
 - 데이터 형식
 - Export 입력 형상
 - QAI Hub 사용 방식
+

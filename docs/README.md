@@ -12,9 +12,7 @@
 
 | 문서 | 역할 |
 |------|------|
-| [260228 Handover](archive/completed-tasks/260228_COMPARISON_AND_TRAINING_METHODS_HANDOVER.md) | 현재 상태 기준 handover 기록 |
-| [260309 Adaptive Teacher Routing Handover](archive/completed-tasks/260309_ADAPTIVE_TEACHER_ROUTING_HANDOVER.md) | Adaptive teacher routing 코드 수정 인수인계서 |
-| [ROOT_DOCS_CLEANUP_SUMMARY.md](archive/ROOT_DOCS_CLEANUP_SUMMARY.md) | 문서 구조 정리 작업 기록 |
+
 
 ## 문서 읽는 순서
 

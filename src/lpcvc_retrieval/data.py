@@ -14,7 +14,38 @@ from torchvision import transforms
 from transformers import CLIPTokenizer
 
 
-def build_tokenizer() -> CLIPTokenizer:
+class OpenClipTokenizerAdapter:
+    """Adapter that makes open_clip tokenizer look like HF tokenizer output."""
+
+    def __init__(self, model_name: str):
+        import open_clip
+
+        self._tokenizer = open_clip.get_tokenizer(model_name)
+        self.context_length = int(getattr(self._tokenizer, "context_length", 77))
+        self.vocab_size = int(len(getattr(self._tokenizer, "encoder", {})) or 49408)
+        self.eos_token_id = int(getattr(self._tokenizer, "eot_token_id", 49407))
+        self.pad_token_id = 0
+
+    def __call__(self, texts, padding="max_length", truncation=True, max_length=77, return_tensors="pt"):
+        if isinstance(texts, str):
+            texts = [texts]
+        tokens = self._tokenizer(texts)
+        if max_length is not None and tokens.shape[1] != max_length:
+            tokens = tokens[:, :max_length]
+        return {"input_ids": tokens}
+
+
+def build_tokenizer(cfg=None):
+    tokenizer_type = "hf_clip"
+    if cfg is not None and hasattr(cfg, "get"):
+        tokenizer_type = str(cfg.data.get("tokenizer_type", "hf_clip")).lower()
+
+    if tokenizer_type == "open_clip":
+        model_name = "ViT-B-16"
+        if cfg is not None and hasattr(cfg, "get"):
+            model_name = str(cfg.model.get("text_model_name", "ViT-B-16"))
+        return OpenClipTokenizerAdapter(model_name)
+
     return CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
 
 
@@ -25,7 +56,7 @@ def _clean_source(source: Any) -> str:
     return source if source else "unknown"
 
 
-def _img_transform_train(augment: bool = True) -> transforms.Compose:
+def _img_transform_train(image_size: int = 224, augment: bool = True) -> transforms.Compose:
     """
     Training transform with optional augmentation.
     
@@ -36,7 +67,7 @@ def _img_transform_train(augment: bool = True) -> transforms.Compose:
     """
     if augment:
         return transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=(0.8, 1.0), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.RandomResizedCrop(image_size, scale=(0.8, 1.0), interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1),
             transforms.ToTensor(),  # [0,1]
@@ -45,11 +76,11 @@ def _img_transform_train(augment: bool = True) -> transforms.Compose:
         return _img_transform_eval()
 
 
-def _img_transform_eval() -> transforms.Compose:
+def _img_transform_eval(image_size: int = 224) -> transforms.Compose:
     """Evaluation transform: deterministic resize and center crop."""
     return transforms.Compose([
-        transforms.Resize(224, interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.CenterCrop(224),
+        transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.CenterCrop(image_size),
         transforms.ToTensor(),  # [0,1]
     ])
 
@@ -65,8 +96,9 @@ class JsonlRetrievalDataset(Dataset):
       {"image":"train2017/0000.jpg","captions":["a ...", "..."]}
     image paths are relative to image_root.
     """
-    def __init__(self, image_root: str, jsonl_path: str, tokenizer: CLIPTokenizer, 
-                 max_caps_per_image: int = 1, is_train: bool = False, augment: bool = True):
+    def __init__(self, image_root: str, jsonl_path: str, tokenizer,
+                 max_caps_per_image: int = 1, is_train: bool = False, augment: bool = True,
+                 image_size: int = 224):
         self.image_root = image_root
         self.jsonl_path = jsonl_path
         self.tokenizer = tokenizer
@@ -75,7 +107,7 @@ class JsonlRetrievalDataset(Dataset):
         self._forced_caption_indices = None
         
         # Use augmentation only for training
-        self.tf = _img_transform_train(augment) if is_train else _img_transform_eval()
+        self.tf = _img_transform_train(image_size=image_size, augment=augment) if is_train else _img_transform_eval(image_size=image_size)
 
         # Train: (img_rel, image_id, captions, source)
         # Eval:  (img_rel, image_id, caption, ann_id, source)
@@ -190,10 +222,11 @@ class CocoCaptionsRetrievalDataset(Dataset):
                  coco_root: str,
                  split: str,
                  captions_json_rel: str,
-                 tokenizer: CLIPTokenizer,
+                 tokenizer,
                  max_caps_per_image: int = 1,
                  is_train: bool = False,
-                 augment: bool = True):
+                 augment: bool = True,
+                 image_size: int = 224):
         self.coco_root = coco_root
         self.split = split  # 'train2017' or 'val2017'
         self.captions_json_path = os.path.join(coco_root, captions_json_rel)
@@ -203,7 +236,7 @@ class CocoCaptionsRetrievalDataset(Dataset):
         self._forced_caption_indices = None
         
         # Use augmentation only for training
-        self.tf = _img_transform_train(augment) if is_train else _img_transform_eval()
+        self.tf = _img_transform_train(image_size=image_size, augment=augment) if is_train else _img_transform_eval(image_size=image_size)
 
         with open(self.captions_json_path, "r", encoding="utf-8") as f:
             coco = json.load(f)
@@ -446,10 +479,11 @@ class OfflineFeatureDataset(Dataset):
         return (*base_item, teacher_embs)
 
 
-def make_datasets(cfg, tokenizer: CLIPTokenizer):
+def make_datasets(cfg, tokenizer):
     mode = str(cfg.data.get("mode", "jsonl")).lower()
     max_caps = int(cfg.data.get("max_captions_per_image", 1))
     train_augment = bool(cfg.data.get("train_augment", True))
+    image_size = int(cfg.model.get("image_input_size", 224))
     
     if mode == "coco":
         coco_root = cfg.data.coco_root
@@ -461,6 +495,7 @@ def make_datasets(cfg, tokenizer: CLIPTokenizer):
             max_caps_per_image=max_caps,
             is_train=True,
             augment=train_augment,
+            image_size=image_size,
         )
         val_ds = CocoCaptionsRetrievalDataset(
             coco_root=coco_root,
@@ -470,6 +505,7 @@ def make_datasets(cfg, tokenizer: CLIPTokenizer):
             max_caps_per_image=max_caps,
             is_train=False,
             augment=False,
+            image_size=image_size,
         )
     else:
         # default jsonl mode
@@ -480,6 +516,7 @@ def make_datasets(cfg, tokenizer: CLIPTokenizer):
             max_caps_per_image=max_caps,
             is_train=True,
             augment=train_augment,
+            image_size=image_size,
         )
         val_ds = JsonlRetrievalDataset(
             image_root=str(cfg.data.get("image_root", ".")),
@@ -488,6 +525,7 @@ def make_datasets(cfg, tokenizer: CLIPTokenizer):
             max_caps_per_image=max_caps,
             is_train=False,
             augment=False,
+            image_size=image_size,
         )
     
     distill_cfg = cfg.get("distill", {})
