@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-MobileCLIP2-Retrieval-Optimization Training Script
-===================================================
-CMD에서 쉽게 학습을 실행할 수 있는 엔트리포인트입니다.
+Dual Distillation Retrieval Optimization Training Script
+=======================================================
+CMD에서 쉽게 현재 dual-tower 학생 모델 학습을 실행하는 엔트리포인트입니다.
 
 Usage:
     python run_train.py --config config.yaml
@@ -23,7 +23,7 @@ from lpcvc_retrieval.train import train
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train MobileCLIP2 Retrieval Model",
+        description="Train the current dual-tower retrieval model",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
@@ -62,17 +62,12 @@ def main():
     else:
         device_info = "CPU"
     
-    student_type = str(cfg.model.get("student_type", "mobileclip2")).lower()
     print("=" * 60)
-    print("  MobileCLIP2-Retrieval-Optimization Training")
+    print("  Dual Distillation Retrieval Optimization Training")
     print("=" * 60)
     print(f"  Device: {device_info}")
-    print(f"  Student Type: {student_type}")
-    if student_type == "mobileclip2":
-        print(f"  MobileCLIP2 Variant: {cfg.model.mobileclip2_variant}")
-    else:
-        print(f"  Image Tower: {cfg.model.image_model_name}")
-        print(f"  Text Tower: {cfg.model.text_model_name}")
+    print(f"  Image Tower: {cfg.model.image_model_name}")
+    print(f"  Text Tower: {cfg.model.text_model_name}")
     print(f"  Epochs: {cfg.train.epochs}")
     print(f"  Batch Size: {cfg.data.batch_size}")
     print(f"  Learning Rate: {cfg.train.lr}")

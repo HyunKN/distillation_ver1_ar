@@ -58,7 +58,7 @@ def evaluate(model: torch.nn.Module, loader: DataLoader, device: str, use_bidire
     Evaluate model on retrieval metrics.
     
     Args:
-        model: MobileCLIP2 student model
+        model: Current retrieval student model
         loader: Validation data loader
         device: Device to run on
         use_bidirectional: If True, compute both I2T and T2I metrics
@@ -159,15 +159,10 @@ def train(cfg) -> str:
     eos_id = int(getattr(tokenizer, "eos_token_id", 0) or 0)
 
     model = create_model_from_config(cfg, vocab_size=vocab_size, eos_id=eos_id).to(device)
-    student_type = str(cfg.model.get("student_type", "mobileclip2")).lower()
-    if student_type == "mobileclip2":
-        variant = str(cfg.model.get("mobileclip2_variant", "S4"))
-        print(f"[Model] MobileCLIP2-{variant} (embed_dim={int(cfg.model.get('embed_dim', 256))})")
-    else:
-        print(
-            f"[Model] DualTower(image={cfg.model.get('image_model_name')}, "
-            f"text={cfg.model.get('text_model_name')}, embed_dim={int(cfg.model.get('embed_dim', 256))})"
-        )
+    print(
+        f"[Model] DualTower(image={cfg.model.get('image_model_name')}, "
+        f"text={cfg.model.get('text_model_name')}, embed_dim={int(cfg.model.get('embed_dim', 256))})"
+    )
 
     # ---- [OPTIONAL] torch.compile (PyTorch 2.x 학습 가속) ----
     use_compile = bool(cfg.train.get("use_compile", False))

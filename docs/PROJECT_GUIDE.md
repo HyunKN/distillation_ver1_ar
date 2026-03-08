@@ -1,4 +1,4 @@
-﻿# MobileCLIP2 Retrieval Optimization — 프로젝트 가이드
+﻿# Dual Distillation Retrieval Optimization — 프로젝트 가이드
 
 > 최종 갱신: 2026-03-09  
 > 이 문서는 현재 저장소 코드를 기준으로 프로젝트의 목적, 구조, 동작 원리, 모든 모듈의 상세 설명을 기록합니다.
@@ -270,7 +270,6 @@ data:
   train_augment: true
 
 model:
-  student_type: dual_tower             # 현재 기본 student 구현
   image_model_name: mobilenetv4_hybrid_large.e600_r384_in1k
   image_pretrained: true
   image_input_size: 384
@@ -375,7 +374,7 @@ device: cuda
 def create_model_from_config(cfg, vocab_size=None, eos_id=None) -> nn.Module
 ```
 
-현재 기본값은 `cfg.model.student_type=dual_tower`이며, 이에 따라 `DualTowerStudent`를 생성합니다. 팩토리는 `student_type` 값에 따라 분기하며, 현재 브랜치의 기본 student는 `dual_tower`입니다.
+현재 팩토리는 `DualTowerStudent`를 생성합니다. 현재 브랜치에서는 `MobileNetV4 Hybrid Large + EVA02-B-16` 학생 구조만 사용합니다.
 
 ### 6.3 OnnxWrapper
 
@@ -892,7 +891,7 @@ Offline teacher feature 추출. 14장 참조.
 ├── docs/
 │   ├── README.md                    # 문서 인덱스
 │   ├── PROJECT_GUIDE.md             # 이 파일
-│   └── archive/                     # 완료된 기록
+│   └── archive/                     # 필요 시 완료 기록을 보관하는 아카이브 영역
 │
 ├── scripts/
 │   ├── eval.py                      # 체크포인트 평가
@@ -913,7 +912,6 @@ Offline teacher feature 추출. 14장 참조.
     ├── losses.py                    # SigLIP, ranking, hard-neg, text-text
     ├── metrics.py                   # Recall@K, COCO-style 평가
     ├── dual_tower.py               # 현재 학생 모델 구현
-    ├── mobileclip2.py               # 기존 MobileCLIP2 구현
     ├── model.py                     # 모델 팩토리, OnnxWrapper
     └── train.py                     # 학습 루프, evaluate, scheduler
 ```
@@ -983,7 +981,7 @@ Offline teacher feature 추출. 14장 참조.
 |------|------|
 | `README.md` | 실행 중심 |
 | `docs/PROJECT_GUIDE.md` | 구조, 구현 중심 (이 파일) |
-| `docs/archive/` | 완료된 handover 및 정리 기록 |
+| `docs/archive/` | 필요 시 완료 기록을 보관하는 아카이브 영역 |
 
 새 실험 추가 시 같이 갱신해야 하는 파일: `config.yaml`, `README.md`, `docs/PROJECT_GUIDE.md`
 
@@ -993,4 +991,5 @@ Offline teacher feature 추출. 14장 참조.
 - 데이터 형식
 - Export 입력 형상
 - QAI Hub 사용 방식
+
 

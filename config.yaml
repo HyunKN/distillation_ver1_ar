@@ -65,7 +65,6 @@ loss:
   w_text_text: 0.05         # Text-Text Contrastive Loss weight
   hard_negative_k: 5        # Number of hard negatives to select
 model:
-  student_type: dual_tower
   image_model_name: mobilenetv4_hybrid_large.e600_r384_in1k
   image_pretrained: true
   image_input_size: 384

@@ -8,4 +8,3 @@ torchvision>=0.17
 onnx>=1.16
 onnxruntime>=1.18
 open_clip_torch>=2.24
-# ml-mobileclip: pip install git+https://github.com/apple/ml-mobileclip.git

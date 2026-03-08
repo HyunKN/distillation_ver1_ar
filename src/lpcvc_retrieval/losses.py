@@ -72,7 +72,7 @@ def siglip_loss(
     image_ids: torch.Tensor,
 ) -> torch.Tensor:
     """
-    [MobileCLIP2 전략] Sigmoid 기반 손실 함수.
+    [현재 기본 전략] Sigmoid 기반 손실 함수.
     배치 사이즈가 작을 때 Softmax보다 훨씬 안정적이며 Recall 향상에 유리합니다.
     
     Args:

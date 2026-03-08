@@ -3,7 +3,7 @@
 이 문서는 현재 프로젝트의 지도입니다.  
 계속 수정하다가 "지금 내가 뭘 하고 있었지?", "어떤 방향으로 프로젝트를 굴리고 있었지?"를 다시 빠르게 떠올리기 위한 복기용 문서입니다.
 
-이 문서를 먼저 읽고, 더 자세한 구현은 `README.md`, `docs/PROJECT_GUIDE.md`, `docs/archive/` 순서로 내려가면 됩니다.
+이 문서를 먼저 읽고, 더 자세한 구현은 `README.md`, `docs/PROJECT_GUIDE.md` 순서로 내려가면 됩니다.
 
 주의:
 
@@ -102,7 +102,7 @@
 ## 4. 프로젝트 전체 구조 지도
 
 ```text
-MobileCLIP2-Retrieval-Optimization/
+Repository/
 ├─ README.md
 ├─ config.yaml
 ├─ run_train.py
@@ -261,7 +261,7 @@ MobileCLIP2-Retrieval-Optimization/
 
 ### 8.1 최근 핵심 결정
 
-1. 프로젝트 기본 축은 `MobileCLIP2-Retrieval-Optimization` 유지로 정리
+1. 현재 저장소 구조는 유지하고 학생 모델만 현재 브랜치 기준으로 교체
 2. offline feature extraction 구조를 핵심 운영 방식으로 채택
 3. caption mismatch 문제를 구조적 결함으로 보고 수정 방향 검토 및 반영
 4. `Temperature Scheduling`과 `Adaptive Teacher Weight`를 우선 적용 대상으로 정리
@@ -306,9 +306,7 @@ MobileCLIP2-Retrieval-Optimization/
 
 ### 9.2 최근 변경 이력을 볼 때
 
-1. `docs/archive/completed-tasks/260309_ADAPTIVE_TEACHER_ROUTING_HANDOVER.md`
-2. `docs/archive/completed-tasks/260228_COMPARISON_AND_TRAINING_METHODS_HANDOVER.md`
-3. `docs/archive/ROOT_DOCS_CLEANUP_SUMMARY.md`
+현재 브랜치에는 별도 handover/archive 문서를 커밋해 두지 않았습니다. 최근 변경 이력은 `git log`, `README.md`, `docs/PROJECT_GUIDE.md` 기준으로 확인합니다.
 
 ---
 
@@ -369,4 +367,5 @@ MobileCLIP2-Retrieval-Optimization/
 1. 길을 잃었을 때 먼저 보는 문서
 2. 내가 무엇을 하던 중이었는지 떠올리는 문서
 3. 세부 구현 문서로 내려가기 전의 상위 개요 문서
+
 

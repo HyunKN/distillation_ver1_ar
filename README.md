@@ -1,4 +1,4 @@
-﻿# MobileCLIP2 Retrieval Optimization
+﻿# Dual Distillation Retrieval Optimization
 
 > LPCVC 2026 Track 1 — MobileNetV4 Hybrid Large + EVA02-B-16 기반 이미지-텍스트 검색 경량 모델 학습 및 지식 증류
 
@@ -28,7 +28,7 @@
 | `docs/PROJECT_MAP.md` | 프로젝트 전체 구조, 방향, 운영 기본값, 학습 로드맵 — 길잡이 |
 | `docs/PROJECT_GUIDE.md` | 코드 구조, 함수 상세, 학습/증류/배포 흐름 — 세부 매뉴얼 |
 | `docs/README.md` | 문서 인덱스 및 읽는 순서 |
-| `docs/archive/` | 완료된 handover 및 정리 기록 |
+| `docs/archive/` | 필요 시 완료 기록을 보관하는 아카이브 영역 |
 
 ---
 
@@ -342,10 +342,7 @@ python compile_and_profile.py \
 ├── docs/
 │   ├── README.md                    # 문서 인덱스
 │   ├── PROJECT_GUIDE.md             # 코드 구조 및 기술 상세
-│   └── archive/                     # 완료된 기록
-│       ├── ROOT_DOCS_CLEANUP_SUMMARY.md
-│       └── completed-tasks/
-│           └── 260228_COMPARISON_AND_TRAINING_METHODS_HANDOVER.md
+│   └── archive/                     # 필요 시 완료 기록을 보관하는 아카이브 영역
 │
 ├── scripts/
 │   ├── eval.py                      # 체크포인트 평가
@@ -366,7 +363,6 @@ python compile_and_profile.py \
     ├── losses.py                    # 손실 함수 모음
     ├── metrics.py                   # Retrieval 평가 지표
     ├── dual_tower.py                # 현재 학생 모델 구현 (MobileNetV4 + EVA02)
-    ├── mobileclip2.py               # 기존 MobileCLIP2 구현
     ├── model.py                     # 모델 팩토리
     └── train.py                     # 학습 루프
 ```
@@ -382,7 +378,6 @@ python compile_and_profile.py \
 | `data.mode` | `jsonl` | 데이터 로더 모드 |
 | `data.batch_size` | `128` | 학습 배치 크기 |
 | `data.max_captions_per_image` | `5` | 캡션 샘플링 상한 |
-| `model.student_type` | `dual_tower` | 학생 모델 팩토리 선택 |
 | `model.image_model_name` | `mobilenetv4_hybrid_large.e600_r384_in1k` | 이미지 타워 |
 | `model.text_model_name` | `EVA02-B-16` | 텍스트 타워 |
 | `model.image_input_size` | `384` | 학생 이미지 입력 크기 |
@@ -462,3 +457,4 @@ python compile_and_profile.py \
 - Meta FAIR
 - OpenCLIP contributors
 - LPCVC 2026 organizers
+
