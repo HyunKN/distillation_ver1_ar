@@ -1,0 +1,10 @@
+pyyaml>=6.0
+tqdm>=4.66
+pillow>=10.0
+numpy>=1.26
+timm>=1.0.7
+transformers>=4.42
+torchvision>=0.17
+onnx>=1.16
+onnxruntime>=1.18
+open_clip_torch>=2.24

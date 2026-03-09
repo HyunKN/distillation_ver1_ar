@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+*.dist-info/
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Dataset (Huge files!)
+dataset/
+data/
+*.json
+!src/**/*.json
+
+# Checkpoints & Logs
+runs/
+features/
+logs/
+checkpoints/
+wandb/
+*.pt
+*.pth
+*.ckpt
+
+# ONNX Exports
+*.onnx
+exported_onnx/
+
+# Agent Skills (local only)
+.agent/
+
+# OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
