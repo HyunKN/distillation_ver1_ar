@@ -34,6 +34,12 @@ tmp/
 # Agent Skills (local only)
 .agent/
 
+# Local credentials / SDK configs
+.qai_hub/
+qai_hub/
+qai_hub_client.ini
+qai_hub_client.ini.bak
+
 # OS
 .DS_Store
 Thumbs.db
