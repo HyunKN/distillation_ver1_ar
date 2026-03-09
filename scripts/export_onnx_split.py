@@ -1,7 +1,11 @@
 import argparse
 import os
+import sys
 import torch
 from datetime import datetime
+
+# Ensure local src/ takes precedence over any globally installed package.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from lpcvc_retrieval.config import load_config
 from lpcvc_retrieval.data import build_tokenizer

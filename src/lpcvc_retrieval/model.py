@@ -29,6 +29,7 @@ def create_model_from_config(cfg, vocab_size: int = None, eos_id: int = None) ->
         freeze_image_backbone=bool(cfg.model.get("freeze_image_backbone", False)),
         freeze_text_backbone=bool(cfg.model.get("freeze_text_backbone", False)),
         image_input_size=int(cfg.model.get("image_input_size", 224)),
+        temperature_init=float(cfg.model.get("temperature_init", 0.07)),
     )
 
 

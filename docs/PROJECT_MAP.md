@@ -15,7 +15,7 @@
 
 ## 1. 이 프로젝트를 한 문장으로
 
-이 프로젝트는 현재 `MobileNetV4 Hybrid Large` 이미지 인코더와 `EVA02-B-16` 텍스트 인코더를 결합한 dual-tower 학생 모델을 기본값으로 두고, 대형 vision-language teacher의 지식을 증류해 모바일 환경용 이미지-텍스트 검색 성능을 높이려는 LPCVC 2026용 retrieval 프로젝트입니다.
+이 프로젝트는 현재 `MobileNetV4 Hybrid Large` 이미지 인코더와 `DatologyAI/retr-opt-vit-b-32` 텍스트 인코더를 결합한 dual-tower 학생 모델을 기본값으로 두고, 대형 vision-language teacher의 지식을 증류해 모바일 환경용 이미지-텍스트 검색 성능을 높이려는 LPCVC 2026용 retrieval 프로젝트입니다.
 
 단, 학생 모델 역시 실험 결과, 라이선스, 대회 조건에 따라 변경될 수 있습니다.
 
@@ -34,7 +34,7 @@
                   ┌──────────────────────────────────────────┐
                   │        Dual-Tower Student (current)      │
                   │  Image: MobileNetV4 Hybrid Large         │
-                  │  Text : EVA02-B-16                       │
+                  │  Text : DatologyAI/retr-opt-vit-b-32     │
                   │  contrastive + distill losses            │
                   └──────────────────────────────────────────┘
                                  │
@@ -49,7 +49,7 @@
 ## 2. 현재 프로젝트의 핵심 목표
 
 1. 모바일에서 돌릴 수 있는 경량 이미지-텍스트 retrieval 모델을 지향한다.
-2. 현재 기준 학생 모델은 `MobileNetV4 Hybrid Large + EVA02-B-16` dual-tower 구조로 본다.
+2. 현재 기준 학생 모델은 `MobileNetV4 Hybrid Large + DatologyAI/retr-opt-vit-b-32` dual-tower 구조로 본다.
 3. 현재 운영 기준으로는 대형 teacher 2개를 활용해 student를 더 잘 가르치는 방향을 쓴다.
 4. 최종 평가는 `Recall@K` 중심의 retrieval 성능으로 판단한다.
 5. 학습 구조는 반복 실험이 쉬운 형태를 우선한다.
@@ -61,9 +61,9 @@
 ### 3.1 현재 기준 학생 모델
 
 - 이미지 타워: `MobileNetV4 Hybrid Large`
-- 텍스트 타워: `EVA02-B-16`
+- 텍스트 타워: `hf-hub:DatologyAI/retr-opt-vit-b-32`
 - 구조: `DualTowerStudent`
-- 이유: 현재 기준으로 정확도 우선 image encoder 후보를 유지하면서도, 대회 텍스트 입력 규격(`1x77`)과 잘 맞는 text encoder를 결합하기 위함
+- 이유: Apache-2.0, retrieval 최적화, OpenCLIP 호환, 대회 텍스트 입력 규격(`1x77`) 적합 조건을 함께 만족하는 현재 기본 후보이기 때문
 - 현재 기본 구현 파일: `src/lpcvc_retrieval/dual_tower.py`
 - 입력 스펙: 이미지 `384 x 384`, 텍스트 길이 `77`
 - 최종 임베딩 차원: `256`
@@ -162,7 +162,7 @@ Repository/
 - `src/lpcvc_retrieval/model.py`
   - 학생 모델 생성 및 로딩
 - `src/lpcvc_retrieval/dual_tower.py`
-  - 현재 학생 모델 구조 (`MobileNetV4 Hybrid Large` + `EVA02-B-16`)
+  - 현재 학생 모델 구조 (`MobileNetV4 Hybrid Large` + `DatologyAI/retr-opt-vit-b-32`)
 - `src/lpcvc_retrieval/data.py`
   - dataset, dataloader, transform 처리
 - `src/lpcvc_retrieval/distill.py`
@@ -270,7 +270,7 @@ Repository/
 7. teacher 조합을 `SigLIP2 + MetaCLIP` 계열에서 다시 검토한 뒤 `SigLIP2 + PE-Core-bigG` 기준으로 정리
 8. 문서 체계를 루트 + `docs/` + `archive/` 구조로 정리
 9. 저장소 코드 라이선스는 Apache-2.0으로 정리하고, 외부 자산 라이선스는 별도 문서로 분리
-10. `MobileNetV4 Hybrid Large + EVA02-B-16` 학생 구조에서 small teacher smoke 검증을 다시 수행
+10. student text encoder 기본값을 `DatologyAI/retr-opt-vit-b-32`로 교체하기로 결정
 11. 작은 teacher(`ViT-B-32`, `ViT-B-16`) 기준 feature 추출, online/offline 학습, eval, ONNX export 재확인
 
 ### 8.2 최근 대화 주제 목록
@@ -285,7 +285,7 @@ Repository/
 8. `SigLIP2 + PE-Core-bigG` 조합 선택
 9. 문서 구조 정리와 handover 문서 보관 위치 정리
 10. 라이선스 정리
-11. `MobileNetV4 Hybrid Large + EVA02-B-16` 학생 구조 검증
+11. `MobileNetV4 Hybrid Large + DatologyAI/retr-opt-vit-b-32` 학생 구조 smoke 검증 및 AI Hub upload-only 확인
 
 ### 8.3 지금 문맥에서 다시 시작할 때 먼저 떠올릴 것
 

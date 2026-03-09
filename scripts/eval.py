@@ -1,7 +1,12 @@
 import argparse
+import os
+import sys
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+# Ensure local src/ takes precedence over any globally installed package.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from lpcvc_retrieval.config import load_config, resolve_device
 from lpcvc_retrieval.data import build_tokenizer, make_datasets, collate_fn

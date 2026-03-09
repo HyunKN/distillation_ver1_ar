@@ -9,7 +9,7 @@ Third-party models, weights, datasets, and frameworks used by this project are g
 | Component | Source | License / Terms (check official page) |
 |---|---|---|
 | MobileNetV4 Hybrid Large image student | [timm/mobilenetv4_hybrid_large.e600_r384_in1k](https://huggingface.co/timm/mobilenetv4_hybrid_large.e600_r384_in1k) | Apache-2.0 |
-| EVA-CLIP text student | [QuanSun/EVA-CLIP](https://huggingface.co/QuanSun/EVA-CLIP) | MIT |
+| DatologyAI retr-opt text student | [DatologyAI/retr-opt-vit-b-32](https://huggingface.co/DatologyAI/retr-opt-vit-b-32) | Apache-2.0 |
 | SigLIP2 teacher | [timm/ViT-gopt-16-SigLIP2-256](https://huggingface.co/timm/ViT-gopt-16-SigLIP2-256) | Apache-2.0 |
 | PE-Core teacher | [facebook/PE-Core-G14-448](https://huggingface.co/facebook/PE-Core-G14-448) | Apache-2.0 |
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | Apache-2.0 |

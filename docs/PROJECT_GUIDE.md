@@ -1,6 +1,6 @@
 ﻿# Dual Distillation Retrieval Optimization — 프로젝트 가이드
 
-> 최종 갱신: 2026-03-09  
+> 최종 갱신: 2026-03-10
 > 이 문서는 현재 저장소 코드를 기준으로 프로젝트의 목적, 구조, 동작 원리, 모든 모듈의 상세 설명을 기록합니다.
 
 ---
@@ -11,7 +11,7 @@
 
 LPCVC 2026 Track 1 — 모바일 환경에서 이미지-텍스트 검색(Image-Text Retrieval)을 수행하는 경량 모델을 학습합니다.
 
-**핵심 전략**: `MobileNetV4 Hybrid Large` 이미지 타워와 `EVA02-B-16` 텍스트 타워로 구성된 dual-tower 학생 모델을 두 개의 대형 teacher 모델(`SigLIP 2 Giant`, `PE-Core bigG-14-448`)로부터 지식 증류하여, 모바일 디바이스에서도 높은 retrieval 성능을 달성합니다.
+**핵심 전략**: `MobileNetV4 Hybrid Large` 이미지 타워와 `DatologyAI/retr-opt-vit-b-32` 텍스트 타워로 구성된 dual-tower 학생 모델을 두 개의 대형 teacher 모델(`SigLIP 2 Giant`, `PE-Core bigG-14-448`)로부터 지식 증류하여, 모바일 디바이스에서도 높은 retrieval 성능을 달성합니다.
 
 ### 1.2 대회 정보
 
@@ -24,7 +24,7 @@ LPCVC 2026 Track 1 — 모바일 환경에서 이미지-텍스트 검색(Image-T
 
 | 결정 | 근거 |
 |------|------|
-| Dual-tower 학생 (`MobileNetV4 Hybrid Large` + `EVA02-B-16`) | 이미지/텍스트 타워를 분리하여 현재 대회 규격과 XR2 레이턴시 요구를 동시에 맞춤 |
+| Dual-tower 학생 (`MobileNetV4 Hybrid Large` + `DatologyAI/retr-opt-vit-b-32`) | 이미지/텍스트 타워를 분리하여 현재 대회 규격과 XR2 레이턴시 요구를 동시에 맞춤 |
 | SigLIP 2 + PE-Core 듀얼 teacher | 서로 다른 강점(정렬 vs 강건성)을 보완 |
 | Adaptive teacher weighting (기본값) | 고정 비율보다 데이터 적응적 mixing이 안전 |
 | Offline feature 모드 지원 | teacher VRAM 0으로 반복 실험 가능 |
@@ -63,17 +63,42 @@ LPCVC 2026 Track 1 — 모바일 환경에서 이미지-텍스트 검색(Image-T
 
 | 항목 | 값 |
 |------|-----|
-| 모델 | `DualTowerStudent` (`MobileNetV4 Hybrid Large` + `EVA02-B-16`) |
+| 모델 | `DualTowerStudent` (`MobileNetV4 Hybrid Large` + `DatologyAI/retr-opt-vit-b-32`) |
 | 이미지 타워 출처 | [timm/mobilenetv4_hybrid_large.e600_r384_in1k](https://huggingface.co/timm/mobilenetv4_hybrid_large.e600_r384_in1k) |
-| 텍스트 타워 출처 | [QuanSun/EVA-CLIP](https://huggingface.co/QuanSun/EVA-CLIP) |
+| 텍스트 타워 출처 | [DatologyAI/retr-opt-vit-b-32](https://huggingface.co/DatologyAI/retr-opt-vit-b-32) |
 | 저장소 코드 라이선스 | Apache-2.0 |
 | 이미지 입력 | `(B, 3, 384, 384)` float32, [0, 1] 범위 |
 | 텍스트 입력 | `(B, 77)` int32 token IDs |
-| 토크나이저 | `open_clip.get_tokenizer("EVA02-B-16")` 기반 `OpenClipTokenizerAdapter` |
+| 토크나이저 | `open_clip.get_tokenizer("hf-hub:DatologyAI/retr-opt-vit-b-32")` 기반 `OpenClipTokenizerAdapter` |
 | 기본 임베딩 차원 | 256 |
 | 출력 | L2 normalized 임베딩 |
 
 학생 모델은 timm 이미지 백본과 open_clip 텍스트 백본을 결합합니다. 두 타워 출력 차원이 `embed_dim`과 다르면 projection layer를 자동 추가합니다.
+
+현재 기본 설정은 `freeze_image_backbone=false`, `freeze_text_backbone=false`입니다. 즉 student의 이미지 인코더와 텍스트 인코더를 둘 다 fine-tuning합니다. 반대로 `freeze=true`는 해당 백본을 고정해서 gradient 업데이트를 막는 실험 옵션입니다.
+
+#### 3.1.1 DatologyAI text tower 설명
+
+`DatologyAI/retr-opt-vit-b-32`는 CLIP 계열의 `ViT-B/32` retrieval-optimized 체크포인트입니다. 현재 저장소에서는 OpenCLIP의 HF Hub 경로인 `hf-hub:DatologyAI/retr-opt-vit-b-32`로 직접 로드합니다.
+
+| 항목 | 내용 |
+|------|------|
+| 모델 계열 | CLIP / ViT-B/32 |
+| 로딩 경로 | `open_clip.create_model("hf-hub:DatologyAI/retr-opt-vit-b-32", pretrained=None)` |
+| 토크나이저 경로 | `open_clip.get_tokenizer("hf-hub:DatologyAI/retr-opt-vit-b-32")` |
+| 텍스트 길이 | `77` |
+| 라이선스 | Apache-2.0 |
+| 현재 역할 | student text encoder |
+
+#### 3.1.2 선정 이유
+
+현재 student text encoder 기본값으로 이 모델을 둔 이유는 아래와 같습니다.
+
+1. Apache-2.0이라 현재 저장소와 대회 운영 조건에 맞습니다.
+2. `1 x 77` 텍스트 입력 규격과 정확히 맞습니다.
+3. OpenCLIP에서 HF Hub 경로로 바로 로드할 수 있어 현재 코드 구조에 무리 없이 통합됩니다.
+4. retrieval task에 맞춰 최적화된 text tower라 classification-oriented 대안보다 목적 적합성이 높습니다.
+5. 기존 image tower(`MobileNetV4 Hybrid Large`)와 결합하는 현재 dual-tower 구조를 유지한 채 student text side만 교체할 수 있습니다.
 
 ### 3.2 Teacher 모델
 
@@ -139,11 +164,11 @@ LPCVC 2026 Track 1 — 모바일 환경에서 이미지-텍스트 검색(Image-T
 현재 기본 경로는 `build_tokenizer(cfg)`를 통해 `data.tokenizer_type=open_clip`일 때 `OpenClipTokenizerAdapter`를 생성하는 방식입니다.
 
 ```python
-build_tokenizer(cfg)  # 현재 기본값: open_clip tokenizer for EVA02-B-16
+build_tokenizer(cfg)  # 현재 기본값: open_clip tokenizer for hf-hub:DatologyAI/retr-opt-vit-b-32
 ```
 
 - 구현 위치: `src/lpcvc_retrieval/data.py`
-- 실제 호출: `open_clip.get_tokenizer("EVA02-B-16")`
+- 실제 호출: `open_clip.get_tokenizer("hf-hub:DatologyAI/retr-opt-vit-b-32")`
 - 출력 길이: `77`
 - 출력 dtype: `int32`
 - 현재 브랜치 smoke test에서도 `(B, 77)` token shape를 확인함
@@ -273,10 +298,9 @@ model:
   image_model_name: mobilenetv4_hybrid_large.e600_r384_in1k
   image_pretrained: true
   image_input_size: 384
-  freeze_image_backbone: false
-  text_model_name: EVA02-B-16
-  text_pretrained: merged2b_s8b_b131k
-  freeze_text_backbone: false
+  freeze_image_backbone: false         # false=학습, true=고정
+  text_model_name: hf-hub:DatologyAI/retr-opt-vit-b-32
+  freeze_text_backbone: false          # false=학습, true=고정
   embed_dim: 256                       # 최종 임베딩 벡터 차원
   temperature_init: 0.07
   logit_scale_min: -4.6
@@ -341,6 +365,121 @@ seed: 42
 device: cuda
 ```
 
+### 5.5 Config 키 상세 명세
+
+이 섹션은 `config.yaml`의 각 설정값이 실제로 어떤 동작을 바꾸는지 설명합니다. README에는 핵심값만 요약하고, 여기서는 세부 동작과 예외 사항까지 적습니다.
+
+#### 5.5.1 `data`
+
+| 키 | 기본값 | 실제 동작 |
+|----|--------|-----------|
+| `data.mode` | `jsonl` | `jsonl`이면 `JsonlRetrievalDataset`, `coco`이면 `CocoCaptionsRetrievalDataset`를 사용합니다. |
+| `data.batch_size` | `128` | train/eval dataloader 기본 배치 크기입니다. `scripts/extract_features.py`도 별도 인자를 주지 않으면 이 값을 기본으로 따릅니다. |
+| `data.coco_root` | `dataset/coco` | `data.mode=coco`일 때 COCO 이미지/annotation의 루트 경로로 사용됩니다. |
+| `data.image_root` | `dataset` | `data.mode=jsonl`일 때 JSONL의 상대 이미지 경로를 해석하는 기준 루트입니다. |
+| `data.max_captions_per_image` | `5` | 학습 시 한 이미지에 여러 캡션이 있을 때, 캡션 선택 후보 풀의 최대 크기를 정합니다. 검증에서는 모든 캡션을 그대로 사용하므로 직접 영향이 없습니다. |
+| `data.num_workers` | `4` | train/eval/extract dataloader의 worker 수입니다. |
+| `data.tokenizer_type` | `open_clip` | `open_clip`이면 `OpenClipTokenizerAdapter`를 생성하고 `model.text_model_name`에 맞는 tokenizer를 사용합니다. 다른 값이면 HF `CLIPTokenizer(openai/clip-vit-base-patch32)`로 fallback합니다. 현재 student 구조에서는 `open_clip`이 사실상 기본 경로입니다. |
+| `data.train_augment` | `true` | train dataset에 `RandomResizedCrop`, `RandomHorizontalFlip`, `ColorJitter`를 적용합니다. `false`면 학습 데이터도 eval transform처럼 deterministic하게 처리합니다. |
+| `data.train_captions_json` | `annotations/captions_train2017.json` | `data.mode=coco`일 때 train captions annotation 파일 경로입니다. |
+| `data.train_jsonl` | `dataset/prepared_jsonl/train.jsonl` | `data.mode=jsonl`일 때 train JSONL 파일 경로입니다. |
+| `data.train_split` | `train2017` | `data.mode=coco`일 때 train 이미지 폴더 이름으로 사용됩니다. |
+| `data.val_captions_json` | `annotations/captions_val2017.json` | `data.mode=coco`일 때 val captions annotation 파일 경로입니다. |
+| `data.val_jsonl` | `dataset/prepared_jsonl/val.jsonl` | `data.mode=jsonl`일 때 val JSONL 파일 경로입니다. |
+| `data.val_split` | `val2017` | `data.mode=coco`일 때 val 이미지 폴더 이름으로 사용됩니다. |
+
+#### 5.5.2 `model`
+
+| 키 | 기본값 | 실제 동작 |
+|----|--------|-----------|
+| `model.image_model_name` | `mobilenetv4_hybrid_large.e600_r384_in1k` | `timm.create_model()`에 전달되는 student image tower 이름입니다. |
+| `model.image_pretrained` | `true` | `true`면 timm pretrained 가중치로 image tower를 초기화합니다. |
+| `model.image_input_size` | `384` | student image 입력을 이 크기로 맞춰 interpolation합니다. train/eval forward와 ONNX export 입력 shape에 모두 반영됩니다. |
+| `model.freeze_image_backbone` | `false` | `false`면 이미지 인코더를 학습합니다. `true`면 image tower 파라미터의 `requires_grad=False`로 고정합니다. |
+| `model.text_model_name` | `hf-hub:DatologyAI/retr-opt-vit-b-32` | `open_clip.create_model()`과 `open_clip.get_tokenizer()`에 전달되는 student text tower 식별자입니다. |
+| `model.freeze_text_backbone` | `false` | `false`면 텍스트 인코더를 학습합니다. `true`면 text tower 파라미터를 고정합니다. |
+| `model.embed_dim` | `256` | 최종 retrieval 임베딩 차원입니다. 백본 출력 차원과 다르면 image/text projection layer가 자동으로 추가됩니다. |
+| `model.temperature_init` | `0.07` | student `logit_scale`의 초기값을 결정합니다. 실제 초기화는 `log(1 / temperature_init)`로 들어갑니다. |
+| `model.logit_scale_min` | `-4.6` | optimizer step 이후 `model.logit_scale`을 이 최소값 이상으로 clamp합니다. |
+| `model.logit_scale_max` | `4.6` | optimizer step 이후 `model.logit_scale`을 이 최대값 이하로 clamp합니다. |
+
+#### 5.5.3 `distill`
+
+| 키 | 기본값 | 실제 동작 |
+|----|--------|-----------|
+| `distill.use_teacher` | `true` | `true`면 teacher를 로드하거나 offline feature를 읽어 distillation loss를 계산합니다. `false`면 student retrieval loss만 학습합니다. |
+| `distill.teachers[].name` | 예: `ViT-gopt-16-SigLIP2-256` | 각 teacher의 OpenCLIP 모델 이름입니다. |
+| `distill.teachers[].pretrained` | 예: `webli`, `meta` | 각 teacher를 로드할 때 사용하는 OpenCLIP pretrained alias입니다. |
+| `distill.teachers[].input_size` | 예: `256`, `448` | teacher 입력 이미지를 이 크기로 강제 resize합니다. 없으면 모델에서 추론합니다. |
+| `distill.static_teacher_weights` | `[0.5, 0.5]` | `teacher_weight_mode=static`일 때 teacher mixing 비율로 사용됩니다. 현재 기본 모드가 `adaptive`이면 최종 mixing에는 직접 쓰이지 않습니다. |
+| `distill.distill_margin_thr` | `0.2` | selective distillation에서 row margin이 이 값보다 작은 샘플에만 distillation을 적용합니다. |
+| `distill.affinity_temp` | `0.1` | legacy fallback 값입니다. `affinity_temp_start/end`가 비어 있을 때만 시작/종료 temperature 기본값으로 사용됩니다. |
+| `distill.affinity_temp_start` | `0.12` | epoch 초반 affinity distillation temperature입니다. 값이 클수록 teacher target이 더 부드럽습니다. |
+| `distill.affinity_temp_end` | `0.07` | 마지막 epoch 쪽 affinity distillation temperature입니다. 값이 작을수록 target이 더 날카로워집니다. |
+| `distill.affinity_temp_schedule` | `cosine` | `constant`, `linear`, `cosine` 중 하나이며 epoch별 temperature 변화를 결정합니다. |
+| `distill.adaptive_teacher_weight` | `true` | teacher별 품질 점수로 동적 mixing을 켭니다. `teacher_weight_mode=static`이어도 자동으로 `adaptive` 또는 `adaptive_source`로 승격될 수 있습니다. |
+| `distill.adaptive_teacher_tau` | `0.07` | adaptive teacher weights를 softmax로 만들 때의 temperature입니다. 작을수록 한 teacher에 가중치가 더 집중됩니다. |
+| `distill.adaptive_teacher_w_min` | `0.20` | adaptive weighting에서 teacher collapse를 막기 위한 최소 가중치 바닥값입니다. |
+| `distill.teacher_weight_mode` | `adaptive` | `static`은 고정 비율, `adaptive`는 품질 기반 동적 비율, `adaptive_source`는 데이터 출처 prior와 adaptive score를 함께 사용합니다. |
+| `distill.source_teacher_weights` | `{}` | `adaptive_source` 모드에서 `source -> teacher_name -> weight` prior 맵으로 사용됩니다. 비어 있으면 uniform prior입니다. |
+| `distill.affinity_columns` | `false` | `false`면 row 방향 affinity distillation만 계산하고, `true`면 열 방향(`s_sim.t()`) distillation도 추가합니다. |
+| `distill.offline_feature_dir` | `null` | 경로가 존재하면 train dataset을 `OfflineFeatureDataset`으로 감싸고 online teacher forward 대신 저장된 teacher embedding을 사용합니다. |
+
+#### 5.5.4 `loss`
+
+| 키 | 기본값 | 실제 동작 |
+|----|--------|-----------|
+| `loss.w_contrastive` | `1.0` | 기본 SigLIP retrieval loss의 가중치입니다. 현재 학습 루프의 주 손실입니다. |
+| `loss.w_distill_affinity` | `0.8` | teacher affinity distillation loss의 가중치입니다. |
+| `loss.w_rank` | `0.1` | pairwise ranking loss의 가중치입니다. `0`이면 ranking loss를 계산하지 않습니다. |
+| `loss.rank_k` | `3` | ranking loss에서 사용할 hard negatives 개수입니다. |
+| `loss.rank_margin` | `0.1` | ranking loss margin 값입니다. |
+| `loss.w_hard_negative` | `0.1` | BLIP/FG-CLIP 계열 hard negative contrastive loss 가중치입니다. |
+| `loss.hard_negative_k` | `5` | hard negative contrastive loss에서 top-k negative 개수입니다. |
+| `loss.w_text_text` | `0.05` | TULIP 스타일 text-text contrastive loss 가중치입니다. |
+| `loss.label_smoothing` | `0.0` | 현재 config에는 남아 있지만 active train path에서는 사용되지 않습니다. 현재 학습은 `clip_contrastive_loss`가 아니라 `siglip_loss`를 사용하기 때문입니다. |
+
+#### 5.5.5 `train`
+
+| 키 | 기본값 | 실제 동작 |
+|----|--------|-----------|
+| `train.amp` | `true` | device가 `cuda`일 때 `torch.amp.autocast`와 `GradScaler`를 켭니다. CPU에서는 자동으로 비활성화됩니다. |
+| `train.epochs` | `10` | 총 학습 epoch 수입니다. |
+| `train.eval_every_epochs` | `1` | 몇 epoch마다 검증을 실행할지 정합니다. |
+| `train.grad_clip` | `1.0` | `clip_grad_norm_`에 전달되는 gradient clipping 최대 norm입니다. `0` 이하이면 clipping을 하지 않습니다. |
+| `train.log_every` | `20` | progress bar postfix와 step 로그를 몇 step마다 갱신할지 정합니다. |
+| `train.lr` | `5.0e-4` | AdamW base learning rate입니다. |
+| `train.warmup_epochs` | `3.0` | warmup 길이를 epoch 단위로 지정합니다. 실제 step 수는 `len(train_loader) * warmup_epochs`로 계산됩니다. |
+| `train.weight_decay` | `0.05` | AdamW weight decay입니다. |
+| `train.use_wandb` | `false` | `true`면 `TrainLogger`가 WandB run을 초기화하고 step/epoch 로그를 보냅니다. |
+| `train.wandb_project` | `lpcvc-clip-lite` | WandB 프로젝트 이름입니다. |
+| `train.wandb_run_name` | `null` | WandB run 이름입니다. `null`이면 logger가 자동 이름을 사용합니다. |
+| `train.use_compile` | `true` | `torch.compile`이 사용 가능하고 PyTorch가 지원하면 학습 전에 모델을 compile합니다. |
+| `train.use_ema` | `true` | EMA shadow weights를 유지합니다. 평가 시에는 EMA weights를 적용해서 검증한 뒤 원래 가중치로 복원합니다. |
+| `train.ema_decay` | `0.999` | EMA decay 계수입니다. 1에 가까울수록 더 천천히 평균냅니다. |
+
+#### 5.5.6 `export`, `output`, `seed`, `device`
+
+| 키 | 기본값 | 실제 동작 |
+|----|--------|-----------|
+| `export.onnx_path` | `model.onnx` | legacy single-file `export_onnx()` 헬퍼용 경로입니다. 현재 기본 CLI인 `scripts/export_onnx_split.py`는 이 값을 직접 쓰지 않고 `--out_dir`와 파일명을 사용합니다. |
+| `export.opset` | `18` | ONNX export opset 버전입니다. split export 스크립트에서 사용됩니다. |
+| `output.out_dir` | `runs/lpcvc_clip_lite` | `best.pt`, `last.pt`, epoch별 checkpoint를 저장하는 기본 출력 경로입니다. |
+| `seed` | `42` | Python random, `torch.manual_seed`, `torch.cuda.manual_seed_all`에 전달됩니다. |
+| `device` | `cuda` | `resolve_device()`로 처리되는 실행 디바이스입니다. `cuda`, `cpu`, `auto`를 기대합니다. `auto`면 CUDA 가능 시 `cuda`, 아니면 `cpu`가 됩니다. |
+
+#### 5.5.7 현재 기본 운영 해석
+
+지금 기본 config를 문장으로 풀면 아래와 같습니다.
+
+1. JSONL 데이터셋을 배치 128로 학습한다.
+2. student는 `MobileNetV4 Hybrid Large + DatologyAI retr-opt-vit-b-32`를 사용한다.
+3. 이미지 타워와 텍스트 타워는 둘 다 freeze하지 않고 같이 학습한다.
+4. teacher는 SigLIP2와 PE-Core 두 개를 사용한다.
+5. teacher mixing은 adaptive 방식으로 두고, offline feature는 기본적으로 끈 상태다.
+6. 손실은 SigLIP retrieval loss를 중심으로 ranking, hard-negative, text-text, affinity distillation을 함께 섞는다.
+7. 학습은 AMP, `torch.compile`, EMA를 켠 상태를 기본 운영안으로 둔다.
+
 ---
 
 ## 6. 학생 모델 상세
@@ -351,7 +490,7 @@ device: cuda
 
 | 메서드 | 시그니처 | 동작 |
 |--------|----------|------|
-| `__init__` | `(image_model_name, text_model_name, embed_dim, image_pretrained, text_pretrained, freeze_image_backbone, freeze_text_backbone, image_input_size)` | 이미지/텍스트 타워 로드 + projection 설정 |
+| `__init__` | `(image_model_name, text_model_name, embed_dim, image_pretrained, text_pretrained, freeze_image_backbone, freeze_text_backbone, image_input_size, temperature_init)` | 이미지/텍스트 타워 로드 + projection 설정 |
 | `_infer_image_output_dim` | `() -> int` | dummy input으로 이미지 타워 출력 차원 추론 |
 | `_infer_text_output_dim` | `() -> int` | tokenizer + `encode_text`로 텍스트 타워 출력 차원 추론 |
 | `_prepare_image_input` | `(images) -> images` | 입력을 `image_input_size`로 resize하고 timm mean/std로 normalize |
@@ -363,10 +502,19 @@ device: cuda
 현재 구현은 다음과 같이 동작합니다.
 
 1. 이미지 타워는 `timm.create_model(..., num_classes=0, global_pool="avg")`로 로드합니다.
-2. 텍스트 타워는 `open_clip.create_model("EVA02-B-16", pretrained="merged2b_s8b_b131k")`로 로드합니다.
+2. 텍스트 타워는 `open_clip.create_model("hf-hub:DatologyAI/retr-opt-vit-b-32", pretrained=None)`로 로드합니다.
 3. 이미지 전처리 통계는 `timm.data.resolve_model_data_config()`에서 읽어옵니다.
 4. 이미지/텍스트 출력 차원이 최종 `embed_dim=256`과 다르면 `nn.Linear(..., bias=False)` projection을 자동 추가합니다.
 5. `logit_scale`과 `logit_bias`는 기존 retrieval loss 흐름과 호환되도록 학생 모델 내부에 유지합니다.
+
+이번 교체에서 실제로 바뀐 구조는 아래와 같습니다.
+
+1. 학생 아키텍처의 큰 틀은 그대로입니다. `timm` image tower + `open_clip` text tower + projection head 구조는 유지됩니다.
+2. 바뀐 것은 text tower의 기본 로딩 대상입니다. 이전 EVA 계열 기본값 대신 HF Hub 기반 DatologyAI retrieval checkpoint를 사용합니다.
+3. `DualTowerStudent`는 tokenizer에서 읽은 `text_context_length`를 내부 속성으로 유지합니다.
+4. 데이터셋 tokenization은 더 이상 `max_length=77` 하드코딩에만 의존하지 않고, tokenizer의 context length를 따라갑니다.
+5. ONNX export도 `model.text_context_length`를 읽어 text dummy input shape를 결정합니다.
+6. 즉, 이번 변경은 "모델 구조 전체 재설계"가 아니라 "student text encoder 교체 + 그에 맞춘 tokenizer/export 경로 일반화"에 가깝습니다.
 
 ### 6.2 create_model_from_config
 
@@ -374,7 +522,7 @@ device: cuda
 def create_model_from_config(cfg, vocab_size=None, eos_id=None) -> nn.Module
 ```
 
-현재 팩토리는 `DualTowerStudent`를 생성합니다. 현재 브랜치에서는 `MobileNetV4 Hybrid Large + EVA02-B-16` 학생 구조만 사용합니다.
+현재 팩토리는 `DualTowerStudent`를 생성합니다. 현재 브랜치에서는 `MobileNetV4 Hybrid Large + DatologyAI/retr-opt-vit-b-32` 학생 구조만 사용합니다.
 
 ### 6.3 OnnxWrapper
 
@@ -929,7 +1077,7 @@ Offline teacher feature 추출. 14장 참조.
 | 구성요소 | 출처 | 라이선스 |
 |----------|------|---------|
 | MobileNetV4 image student | [timm/mobilenetv4_hybrid_large.e600_r384_in1k](https://huggingface.co/timm/mobilenetv4_hybrid_large.e600_r384_in1k) | Apache-2.0 |
-| EVA-CLIP text student | [QuanSun/EVA-CLIP](https://huggingface.co/QuanSun/EVA-CLIP) | MIT |
+| DatologyAI retr-opt text student | [DatologyAI/retr-opt-vit-b-32](https://huggingface.co/DatologyAI/retr-opt-vit-b-32) | Apache-2.0 |
 | SigLIP2 teacher | [timm/ViT-gopt-16-SigLIP2-256](https://huggingface.co/timm/ViT-gopt-16-SigLIP2-256) | Apache-2.0 |
 | PE-Core teacher | [facebook/PE-Core-G14-448](https://huggingface.co/facebook/PE-Core-G14-448) | Apache-2.0 |
 | timm | [huggingface/pytorch-image-models](https://github.com/huggingface/pytorch-image-models) | Apache-2.0 |
@@ -949,7 +1097,7 @@ Offline teacher feature 추출. 14장 참조.
 | 기법 | 논문/출처 |
 |------|----------|
 | MobileNetV4 | [MobileNetV4: Universal Models for the Mobile Ecosystem](https://arxiv.org/abs/2404.10518) |
-| EVA-CLIP | [EVA-CLIP model card](https://huggingface.co/QuanSun/EVA-CLIP) |
+| DatologyAI retr-opt | [DatologyAI/retr-opt-vit-b-32 model card](https://huggingface.co/DatologyAI/retr-opt-vit-b-32) |
 | SigLIP Loss | [Sigmoid Loss for Language Image Pre-Training](https://arxiv.org/abs/2303.15343) |
 | Hard Negative Mining | [BLIP](https://arxiv.org/abs/2201.12086), [FG-CLIP](https://arxiv.org/abs/2405.11510) |
 | Text-Text Contrastive | [TULIP](https://arxiv.org/abs/2406.06512) |
