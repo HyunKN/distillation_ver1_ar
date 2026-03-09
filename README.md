@@ -80,14 +80,13 @@
 - `ViT-gopt-16-SigLIP2-256` — 이미지-텍스트 정렬 품질이 강한 teacher
 - `PE-Core-bigG-14-448` — 시각적 강건성이 강한 teacher
 - `distill.teachers` — 어떤 teacher를 쓸지 정의하는 목록
-- `distill.static_teacher_weights` — `teacher_weight_mode=static`일 때만 쓰는 mixing 설정
+- 고정 비율 실험을 할 때만 `distill.static_teacher_weights`를 추가해 teacher mixing 비율을 지정
 
 #### 3. 현재 기본 Distillation 방식
 
 ```yaml
 distill:
   adaptive_teacher_weight: true
-  static_teacher_weights: [0.5, 0.5]
   teacher_weight_mode: adaptive
   source_teacher_weights: {}
 ```
@@ -95,7 +94,8 @@ distill:
 - teacher 둘 다 사용
 - source prior 없이 순수 adaptive routing
 - 현재 배치/샘플에서 더 우수한 teacher에 비중을 부여
-- `static_teacher_weights`는 현재 기본 모드(`adaptive`)에서는 최종 mixing 비율에 영향을 주지 않음
+- 그래서 기본 config에는 `static_teacher_weights`를 넣지 않음
+- 나중에 static 실험을 하려면 `teacher_weight_mode: static`, `adaptive_teacher_weight: false`로 바꾸고 필요하면 `static_teacher_weights: [0.5, 0.5]`를 추가
 
 #### 4. Offline Teacher Feature 모드
 

@@ -315,8 +315,7 @@ distill:
     - name: PE-Core-bigG-14-448
       pretrained: meta
       input_size: 448
-  static_teacher_weights: [0.5, 0.5]   # static 모드 전용 mixing 비율
-  adaptive_teacher_weight: true         # true이면 adaptive/adaptive_source 자동 승격
+  adaptive_teacher_weight: true         # static 실험을 하려면 false로 바꿔야 함
   teacher_weight_mode: adaptive         # static | adaptive | adaptive_source
   adaptive_teacher_tau: 0.07            # softmax temperature
   adaptive_teacher_w_min: 0.20          # teacher collapse 방지 최소 가중치
@@ -411,7 +410,7 @@ device: cuda
 | `distill.teachers[].name` | 예: `ViT-gopt-16-SigLIP2-256` | 각 teacher의 OpenCLIP 모델 이름입니다. |
 | `distill.teachers[].pretrained` | 예: `webli`, `meta` | 각 teacher를 로드할 때 사용하는 OpenCLIP pretrained alias입니다. |
 | `distill.teachers[].input_size` | 예: `256`, `448` | teacher 입력 이미지를 이 크기로 강제 resize합니다. 없으면 모델에서 추론합니다. |
-| `distill.static_teacher_weights` | `[0.5, 0.5]` | `teacher_weight_mode=static`일 때 teacher mixing 비율로 사용됩니다. 현재 기본 모드가 `adaptive`이면 최종 mixing에는 직접 쓰이지 않습니다. |
+| `distill.static_teacher_weights` | 없음(기본 config에서 생략) | `teacher_weight_mode=static`일 때만 teacher mixing 비율로 사용됩니다. 현재 기본 모드가 `adaptive`이므로 기본 config에서는 아예 적지 않습니다. |
 | `distill.distill_margin_thr` | `0.2` | selective distillation에서 row margin이 이 값보다 작은 샘플에만 distillation을 적용합니다. |
 | `distill.affinity_temp` | `0.1` | legacy fallback 값입니다. `affinity_temp_start/end`가 비어 있을 때만 시작/종료 temperature 기본값으로 사용됩니다. |
 | `distill.affinity_temp_start` | `0.12` | epoch 초반 affinity distillation temperature입니다. 값이 클수록 teacher target이 더 부드럽습니다. |
@@ -424,6 +423,17 @@ device: cuda
 | `distill.source_teacher_weights` | `{}` | `adaptive_source` 모드에서 `source -> teacher_name -> weight` prior 맵으로 사용됩니다. 비어 있으면 uniform prior입니다. |
 | `distill.affinity_columns` | `false` | `false`면 row 방향 affinity distillation만 계산하고, `true`면 열 방향(`s_sim.t()`) distillation도 추가합니다. |
 | `distill.offline_feature_dir` | `null` | 경로가 존재하면 train dataset을 `OfflineFeatureDataset`으로 감싸고 online teacher forward 대신 저장된 teacher embedding을 사용합니다. |
+
+static 비율 실험을 하려면 한 줄만 추가하는 것으로는 부족합니다. 아래처럼 두 설정을 함께 바꿔야 실제로 static 모드가 됩니다.
+
+```yaml
+distill:
+  teacher_weight_mode: static
+  adaptive_teacher_weight: false
+  static_teacher_weights: [0.5, 0.5]  # 필요할 때만 추가
+```
+
+`adaptive_teacher_weight=true`인 채로 `teacher_weight_mode=static`만 바꾸면, 코드가 자동으로 `adaptive` 또는 `adaptive_source`로 다시 승격시킵니다.
 
 #### 5.5.4 `loss`
 

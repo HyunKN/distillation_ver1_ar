@@ -20,7 +20,7 @@ distill:
   # Dual Teacher Setup for A100 (SigLIP 2 Giant + PE-Core-bigG-14-448)
   # teacher 정의와 teacher mixing 정책을 분리합니다.
   # 아래 teachers 블록은 "무슨 teacher를 쓸지"만 정의합니다.
-  # teacher_weight_mode=static 일 때의 mixing 비율은 static_teacher_weights 에서만 읽습니다.
+  # teacher_weight_mode=static 실험을 할 때만 static_teacher_weights 를 추가하세요.
   # source-aware routing을 쓰려면 teacher_weight_mode=adaptive_source 로 바꾸고
   # source_teacher_weights 에 데이터셋별 prior를 지정하세요.
   teachers:
@@ -35,15 +35,13 @@ distill:
       pretrained: meta
       input_size: 448
 
-  static_teacher_weights: [0.5, 0.5]  # teacher_weight_mode=static 일 때만 사용
-      
   # Distillation strategy settings
   distill_margin_thr: 0.2          # selective distill threshold
   affinity_temp: 0.1               # fallback (legacy)
   affinity_temp_start: 0.12        # epoch 1 temperature (softer targets)
   affinity_temp_end: 0.07          # final epoch temperature (sharper targets)
   affinity_temp_schedule: cosine   # constant | linear | cosine
-  adaptive_teacher_weight: true    # true면 teacher_weight_mode=static 이어도 adaptive/adaptive_source 로 자동 승격
+  adaptive_teacher_weight: true    # static 실험을 하려면 false로 바꿔야 함
   adaptive_teacher_tau: 0.07       # softmax temperature for adaptive weighting
   adaptive_teacher_w_min: 0.20     # teacher collapse 방지 최소 가중치(2명 기준 0.0~0.49)
   teacher_weight_mode: adaptive    # static | adaptive | adaptive_source
