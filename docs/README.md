@@ -12,7 +12,7 @@
 
 | 문서 | 역할 |
 |------|------|
-| 현재 없음 | 완료 문서가 생기면 `docs/archive/` 아래에 추가 |
+| [2026-03-10-student-text-encoder-migration.md](archive/completed-tasks/2026-03-10-student-text-encoder-migration.md) | DatologyAI student text encoder 전환, 코드 수정 이유, smoke 검증 결과 패치노트 |
 
 
 ## 문서 읽는 순서

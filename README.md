@@ -1,6 +1,6 @@
 ﻿# Dual Distillation Retrieval Optimization
 
-> LPCVC 2026 Track 1 — MobileNetV4 Hybrid Large + EVA02-B-16 기반 이미지-텍스트 검색 경량 모델 학습 및 지식 증류
+> LPCVC 2026 Track 1 — MobileNetV4 Hybrid Large + DatologyAI retr-opt-vit-b-32 기반 이미지-텍스트 검색 경량 모델 학습 및 지식 증류
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -8,10 +8,10 @@
 
 ## Overview
 
-현재 브랜치에서는 `MobileNetV4 Hybrid Large` 이미지 타워와 `EVA02-B-16` 텍스트 타워를 결합한 dual-tower 학생 모델을 사용해 모바일 환경 이미지-텍스트 검색 모델을 학습합니다.
+현재 브랜치에서는 `MobileNetV4 Hybrid Large` 이미지 타워와 `hf-hub:DatologyAI/retr-opt-vit-b-32` 텍스트 타워를 결합한 dual-tower 학생 모델을 사용해 모바일 환경 이미지-텍스트 검색 모델을 학습합니다.
 
 **핵심 사항**
-- **학생 모델**: `DualTowerStudent` — `MobileNetV4 Hybrid Large` image encoder + `EVA02-B-16` text encoder
+- **학생 모델**: `DualTowerStudent` — `MobileNetV4 Hybrid Large` image encoder + `DatologyAI/retr-opt-vit-b-32` text encoder
 - **Teacher 모델**: `ViT-gopt-16-SigLIP2-256` + `PE-Core-bigG-14-448`
 - **Dual Distillation**: 배치/샘플 품질 기반 adaptive teacher weighting
 - **Offline Feature 모드**: teacher VRAM 없이 반복 실험 가능
@@ -49,7 +49,7 @@
                   ┌──────────────────────────────────────────┐
                   │        Dual-Tower Student (current)      │
                   │  Image: MobileNetV4 Hybrid Large         │
-                  │  Text : EVA02-B-16                       │
+                  │  Text : DatologyAI/retr-opt-vit-b-32     │
                   │  contrastive + distill losses            │
                   └──────────────────────────────────────────┘
                                  │
@@ -63,7 +63,9 @@
 
 #### 1. 학생 모델 — Dual-Tower Student
 
-실제 배포 대상입니다. 이미지 타워는 `MobileNetV4 Hybrid Large`, 텍스트 타워는 `EVA02-B-16`을 사용하며, 두 타워의 임베딩을 같은 `256`차원으로 투영한 뒤 유사도로 검색을 수행합니다.
+실제 배포 대상입니다. 이미지 타워는 `MobileNetV4 Hybrid Large`, 텍스트 타워는 `hf-hub:DatologyAI/retr-opt-vit-b-32`를 사용하며, 두 타워의 임베딩을 같은 `256`차원으로 투영한 뒤 유사도로 검색을 수행합니다. 학생 텍스트 타워는 retrieval-optimized OpenCLIP HF Hub 경로로 직접 로드되며, LPCVC 텍스트 입력 규격인 `1 x 77`과 맞습니다.
+
+기본 설정에서는 `freeze_image_backbone=false`, `freeze_text_backbone=false`이므로 이미지/텍스트 인코더 둘 다 학습됩니다. 여기서 `freeze=true`는 해당 타워를 고정해 업데이트하지 않는다는 뜻입니다.
 
 - 코드: `src/lpcvc_retrieval/dual_tower.py`
 - 팩토리: `src/lpcvc_retrieval/model.py`
@@ -312,17 +314,21 @@ python compile_and_profile.py \
 
 ## Validation Snapshot
 
-2026-03-09 기준 현재 브랜치에서 아래 경로를 실제로 다시 확인했습니다.
+2026-03-10 기준 현재 브랜치에서 아래 경로를 실제로 다시 확인했습니다.
 
 | 항목 | 결과 | 비고 |
 |------|------|------|
-| Small teacher feature extraction | 통과 | `ViT-B-32 (openai)` + `ViT-B-16 (openai)`로 재검증 |
-| Online teacher 학습 | 통과 | `runs/smoke_mnv4_eva02/recheck_train_online` |
-| Offline feature 학습 | 통과 | `runs/smoke_mnv4_eva02/recheck_train_offline` |
-| Evaluation | 통과 | COCO-style smoke evaluation |
-| ONNX split export | 통과 | `runs/smoke_mnv4_eva02/recheck_exported_onnx` |
+| Small teacher feature extraction | 통과 | `ViT-B-32 (openai)` + `ViT-B-16 (openai)` 경로는 그대로 동작 |
+| Student tokenizer/model load | 통과 | `hf-hub:DatologyAI/retr-opt-vit-b-32`, `context_length=77` |
+| Student dummy forward | 통과 | `(1,3,384,384)` + `(1,77)` -> image/text `(1,256)` |
+| Online teacher train smoke | 통과 | small teacher 2개(`ViT-B-32`, `ViT-B-16`), 1 epoch CPU smoke |
+| Offline feature extraction smoke | 통과 | `tmp/smoke_e2e/features` |
+| Offline teacher train smoke | 통과 | `tmp/smoke_e2e/runs_offline` |
+| Eval smoke | 통과 | online/offline best checkpoint 모두 `scripts/eval.py`로 재검증 |
+| ONNX split export smoke | 통과 | `tmp/smoke_e2e/exported_onnx_local/{image_encoder,text_encoder}.onnx` |
+| AI Hub upload-only smoke | 통과 | image=`mn493d1rq`, text=`mmx26z7kn` |
 
-> AI Hub compile/profile는 제출 전 최종 산출물 기준으로 별도 확인하는 것이 좋습니다.
+> AI Hub compile/profile는 이번 확인 범위에 포함하지 않았습니다. 이번 smoke는 ONNX export와 upload까지만 확인했습니다.
 
 ---
 
@@ -362,7 +368,7 @@ python compile_and_profile.py \
     ├── logger.py                    # 학습 로거
     ├── losses.py                    # 손실 함수 모음
     ├── metrics.py                   # Retrieval 평가 지표
-    ├── dual_tower.py                # 현재 학생 모델 구현 (MobileNetV4 + EVA02)
+    ├── dual_tower.py                # 현재 학생 모델 구현 (MobileNetV4 + DatologyAI retr-opt)
     ├── model.py                     # 모델 팩토리
     └── train.py                     # 학습 루프
 ```
@@ -371,28 +377,32 @@ python compile_and_profile.py \
 
 ## Configuration
 
-자주 확인하는 설정:
+자주 확인하는 설정만 요약합니다. 전체 키별 동작은 [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md)의 Configuration Reference를 참고하세요.
 
 | 설정 | 기본값 | 설명 |
 |------|--------|------|
-| `data.mode` | `jsonl` | 데이터 로더 모드 |
-| `data.batch_size` | `128` | 학습 배치 크기 |
-| `data.max_captions_per_image` | `5` | 캡션 샘플링 상한 |
-| `model.image_model_name` | `mobilenetv4_hybrid_large.e600_r384_in1k` | 이미지 타워 |
-| `model.text_model_name` | `EVA02-B-16` | 텍스트 타워 |
-| `model.image_input_size` | `384` | 학생 이미지 입력 크기 |
-| `data.tokenizer_type` | `open_clip` | 현재 text tower와 맞는 토크나이저 선택 |
-| `model.embed_dim` | `256` | 최종 임베딩 차원 |
-| `distill.use_teacher` | `true` | Teacher distillation 사용 |
-| `distill.adaptive_teacher_weight` | `true` | 동적 가중치 활성화 |
-| `distill.teacher_weight_mode` | `adaptive` | Teacher routing 모드 |
-| `distill.static_teacher_weights` | `[0.5, 0.5]` | `static` 모드 전용 mixing 비율 |
-| `distill.source_teacher_weights` | `{}` | `adaptive_source` 전용 source prior |
-| `distill.offline_feature_dir` | `null` | Offline feature 경로 |
-| `loss.w_distill_affinity` | `0.8` | Affinity distillation 비중 |
-| `train.use_compile` | `true` | `torch.compile` 사용 |
-| `train.use_ema` | `true` | EMA 사용 |
-| `output.out_dir` | `runs/lpcvc_clip_lite` | 체크포인트 출력 경로 |
+| `data.mode` | `jsonl` | `jsonl`이면 JSONL 데이터셋, `coco`면 COCO captions JSON 로더를 사용 |
+| `data.batch_size` | `128` | train/eval/extract에 공통으로 쓰이는 기본 배치 크기 |
+| `data.max_captions_per_image` | `5` | 학습 시 한 이미지에서 캡션 후보를 몇 개까지 샘플링할지 결정 |
+| `data.train_augment` | `true` | `true`면 train transform에 랜덤 crop/flip/color jitter 적용 |
+| `data.tokenizer_type` | `open_clip` | 현재 student text tower와 맞는 OpenCLIP tokenizer 경로 사용 |
+| `model.image_model_name` | `mobilenetv4_hybrid_large.e600_r384_in1k` | student 이미지 타워 이름 (`timm.create_model`) |
+| `model.text_model_name` | `hf-hub:DatologyAI/retr-opt-vit-b-32` | student 텍스트 타워 이름 (`open_clip.create_model`) |
+| `model.freeze_image_backbone` | `false` | `false`면 이미지 타워 학습, `true`면 고정 |
+| `model.freeze_text_backbone` | `false` | `false`면 텍스트 타워 학습, `true`면 고정 |
+| `model.image_input_size` | `384` | student 이미지 입력 리사이즈 크기 및 export 입력 크기 |
+| `model.embed_dim` | `256` | 최종 검색 임베딩 차원 |
+| `distill.use_teacher` | `true` | `true`면 teacher distillation loss를 함께 학습 |
+| `distill.teacher_weight_mode` | `adaptive` | teacher mixing 방식을 `static`/`adaptive`/`adaptive_source` 중 선택 |
+| `distill.offline_feature_dir` | `null` | 경로가 있으면 online teacher 대신 pre-extracted teacher feature 사용 |
+| `loss.w_contrastive` | `1.0` | 기본 SigLIP retrieval loss 비중 |
+| `loss.w_distill_affinity` | `0.8` | teacher affinity distillation 비중 |
+| `train.epochs` | `10` | 총 학습 epoch 수 |
+| `train.lr` | `5e-4` | AdamW 기본 learning rate |
+| `train.amp` | `true` | CUDA에서 mixed precision 학습 사용 |
+| `train.use_compile` | `true` | 가능하면 `torch.compile`로 모델을 컴파일 |
+| `train.use_ema` | `true` | EMA shadow weights를 유지하고 평가 시 사용 |
+| `output.out_dir` | `runs/lpcvc_clip_lite` | 체크포인트와 학습 산출물 저장 경로 |
 
 ---
 
@@ -412,6 +422,19 @@ python compile_and_profile.py \
 > 이 저장소는 측정 스크립트와 export/compile 경로를 제공합니다.
 > 실제 latency/메모리 수치는 export된 모델과 디바이스 job 결과로 별도 확인해야 합니다.
 
+### Student Encoder Runtime Snapshot
+
+측정 기준: `XR2 Gen 2 (Proxy)`에서 student image/text encoder를 각각 독립적으로 compile/profile한 결과입니다.
+
+| Encoder | Model | Input | Minimum Inference Time | Estimated Peak Memory Usage | Compute Units | Compile Job ID | Profile Job ID |
+|------|------|------|------------------------|-----------------------------|---------------|----------------|----------------|
+| Image Encoder | `mobilenetv4_hybrid_large.e600_r384_in1k` | `384x384` | `15.85 ms` | `2 - 116 MB` | `NPU 354` | `-` | `j57dw6er5` |
+| Text Encoder | `DatologyAI/retr-opt-vit-b-32` | `int32[1,77]` | `4.1 ms` | `0 - 146 MB` | `NPU 478` | `jpryqw30g` | `jpydwm38p` |
+
+- image encoder는 Qualcomm AI Hub에 image encoder만 직접 업로드해 profile한 결과입니다.
+- text encoder는 `DatologyAI/retr-opt-vit-b-32` profile 결과 기준입니다.
+- 두 값을 단순 합산한 최소 추론시간은 약 `19.95 ms`지만, 실제 end-to-end 파이프라인 latency와 동일하다고 보기는 어렵습니다.
+
 ---
 
 ## Technical Details
@@ -420,7 +443,7 @@ python compile_and_profile.py \
 
 주요 내용:
 - 데이터 파이프라인과 JSONL 계약
-- Dual-tower 학생 모델 구조 (`MobileNetV4 Hybrid Large` + `EVA02-B-16`)
+- Dual-tower 학생 모델 구조 (`MobileNetV4 Hybrid Large` + `DatologyAI/retr-opt-vit-b-32`)
 - Teacher 로딩과 adaptive distillation 로직
 - Offline teacher feature 검증 방식
 - 학습 / 평가 / export / QAI Hub 흐름
@@ -430,7 +453,7 @@ python compile_and_profile.py \
 ## References
 
 - [MobileNetV4](https://arxiv.org/abs/2404.10518) — Google Research / TensorFlow Models
-- [EVA-CLIP](https://huggingface.co/QuanSun/EVA-CLIP) — BAAI / OpenCLIP ecosystem
+- [DatologyAI retr-opt-vit-b-32](https://huggingface.co/DatologyAI/retr-opt-vit-b-32) — DatologyAI / Apache-2.0 retrieval text tower
 - [SigLIP 2](https://github.com/google-research/big_vision/blob/main/big_vision/configs/proj/image_text/README_siglip2.md) — Google Research
 - [PE-Core / Perception Models](https://github.com/facebookresearch/perception_models) — Meta FAIR
 - [OpenCLIP](https://github.com/mlfoundations/open_clip) — MLFoundations

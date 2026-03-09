@@ -20,6 +20,7 @@ class DualTowerStudent(nn.Module):
         freeze_image_backbone: bool = False,
         freeze_text_backbone: bool = False,
         image_input_size: Optional[int] = None,
+        temperature_init: float = 0.07,
     ):
         super().__init__()
 
@@ -34,6 +35,7 @@ class DualTowerStudent(nn.Module):
         self.text_pretrained = text_pretrained
         self.freeze_image_backbone = bool(freeze_image_backbone)
         self.freeze_text_backbone = bool(freeze_text_backbone)
+        self.temperature_init = float(temperature_init)
 
         self.image_tower = timm.create_model(
             self.image_model_name,
@@ -55,6 +57,7 @@ class DualTowerStudent(nn.Module):
             pretrained=self.text_pretrained,
         )
         self._tokenizer = open_clip.get_tokenizer(self.text_model_name)
+        self.text_context_length = int(getattr(self._tokenizer, "context_length", 77))
 
         self.image_output_dim = self._infer_image_output_dim()
         self.text_output_dim = self._infer_text_output_dim()
@@ -78,7 +81,8 @@ class DualTowerStudent(nn.Module):
             for param in self.text_tower.parameters():
                 param.requires_grad = False
 
-        self.logit_scale = nn.Parameter(torch.tensor(1.0 / 0.07).log())
+        temp = max(self.temperature_init, 1e-6)
+        self.logit_scale = nn.Parameter(torch.tensor(1.0 / temp).log())
         self.logit_bias = nn.Parameter(torch.zeros([]))
 
     def _infer_image_output_dim(self) -> int:

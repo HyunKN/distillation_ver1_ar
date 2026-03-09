@@ -29,6 +29,7 @@ wandb/
 # ONNX Exports
 *.onnx
 exported_onnx/
+tmp/
 
 # Agent Skills (local only)
 .agent/

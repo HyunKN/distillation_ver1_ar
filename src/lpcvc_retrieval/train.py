@@ -492,7 +492,10 @@ def train(cfg) -> str:
 
             if r10 > best_r10:
                 best_r10 = r10
-                torch.save(ckpt, best_path)
+                best_ckpt = {"model": model.state_dict(), "config": cfg.as_dict(), "epoch": epoch + 1}
+                if ema is not None:
+                    best_ckpt["ema"] = ema.state_dict()
+                torch.save(best_ckpt, best_path)
                 print(f"  -> New best model saved! R@10={r10*100:.2f}%")
             
             # [NEW] EMA 복원

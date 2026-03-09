@@ -7,12 +7,17 @@ import torch
 from .model import OnnxWrapper
 
 
+def _resolve_text_context_length(model: torch.nn.Module, default: int = 77) -> int:
+    return int(getattr(model, "text_context_length", default))
+
+
 def export_onnx(model: torch.nn.Module, onnx_path: str, opset: int = 17):
     model.eval()
     wrapper = OnnxWrapper(model)
     image_size = int(getattr(model, "image_input_size", 224))
+    text_context_length = _resolve_text_context_length(model)
     dummy_img = torch.zeros(1, 3, image_size, image_size, dtype=torch.float32)
-    dummy_txt = torch.zeros(1, 77, dtype=torch.int32)
+    dummy_txt = torch.zeros(1, text_context_length, dtype=torch.int32)
     os.makedirs(os.path.dirname(onnx_path) or ".", exist_ok=True)
     torch.onnx.export(
         wrapper,
@@ -40,7 +45,8 @@ def export_onnx_split(
     """Export student model as two ONNX files (image/text encoders).
 
     - image_encoder.onnx: input "image" float32 (1,3,224,224) -> output "embedding" float32 (1,D)
-    - text_encoder.onnx:  input "text"  int32   (1,77)        -> output "embedding" float32 (1,D)
+    - text_encoder.onnx:  input "text"  int32   (1,L_text)    -> output "embedding" float32 (1,D)
+      Current default student config uses L_text=77.
     """
     import torch.nn as nn
 
@@ -64,8 +70,9 @@ def export_onnx_split(
     model.eval()
 
     image_size = int(getattr(model, "image_input_size", 224))
+    text_context_length = _resolve_text_context_length(model)
     dummy_img = torch.rand(1, 3, image_size, image_size, dtype=torch.float32)
-    dummy_txt = torch.zeros(1, 77, dtype=torch.int32)
+    dummy_txt = torch.zeros(1, text_context_length, dtype=torch.int32)
 
     image_onnx_path = os.path.join(out_dir, img_name)
     text_onnx_path = os.path.join(out_dir, txt_name)

@@ -69,8 +69,7 @@ model:
   image_pretrained: true
   image_input_size: 384
   freeze_image_backbone: false
-  text_model_name: EVA02-B-16
-  text_pretrained: merged2b_s8b_b131k
+  text_model_name: hf-hub:DatologyAI/retr-opt-vit-b-32
   freeze_text_backbone: false
   embed_dim: 256
   temperature_init: 0.07

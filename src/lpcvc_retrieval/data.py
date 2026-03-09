@@ -14,6 +14,18 @@ from torchvision import transforms
 from transformers import CLIPTokenizer
 
 
+def _resolve_context_length(tokenizer: Any, default: int = 77) -> int:
+    context_length = getattr(tokenizer, "context_length", None)
+    if context_length is not None:
+        return int(context_length)
+
+    model_max_length = getattr(tokenizer, "model_max_length", None)
+    if isinstance(model_max_length, int) and 1 <= model_max_length <= 4096:
+        return int(model_max_length)
+
+    return int(default)
+
+
 class OpenClipTokenizerAdapter:
     """Adapter that makes open_clip tokenizer look like HF tokenizer output."""
 
@@ -21,15 +33,21 @@ class OpenClipTokenizerAdapter:
         import open_clip
 
         self._tokenizer = open_clip.get_tokenizer(model_name)
-        self.context_length = int(getattr(self._tokenizer, "context_length", 77))
-        self.vocab_size = int(len(getattr(self._tokenizer, "encoder", {})) or 49408)
+        self.context_length = _resolve_context_length(self._tokenizer)
+        self.vocab_size = int(
+            getattr(self._tokenizer, "vocab_size", 0)
+            or len(getattr(self._tokenizer, "encoder", {}))
+            or 49408
+        )
         self.eos_token_id = int(getattr(self._tokenizer, "eot_token_id", 49407))
         self.pad_token_id = 0
 
-    def __call__(self, texts, padding="max_length", truncation=True, max_length=77, return_tensors="pt"):
+    def __call__(self, texts, padding="max_length", truncation=True, max_length=None, return_tensors="pt"):
         if isinstance(texts, str):
             texts = [texts]
         tokens = self._tokenizer(texts)
+        if max_length is None:
+            max_length = self.context_length
         if max_length is not None and tokens.shape[1] != max_length:
             tokens = tokens[:, :max_length]
         return {"input_ids": tokens}
@@ -73,7 +91,7 @@ def _img_transform_train(image_size: int = 224, augment: bool = True) -> transfo
             transforms.ToTensor(),  # [0,1]
         ])
     else:
-        return _img_transform_eval()
+        return _img_transform_eval(image_size=image_size)
 
 
 def _img_transform_eval(image_size: int = 224) -> transforms.Compose:
@@ -102,6 +120,7 @@ class JsonlRetrievalDataset(Dataset):
         self.image_root = image_root
         self.jsonl_path = jsonl_path
         self.tokenizer = tokenizer
+        self.text_context_length = _resolve_context_length(tokenizer)
         self.max_caps_per_image = max(1, int(max_caps_per_image))
         self.is_train = is_train
         self._forced_caption_indices = None
@@ -190,7 +209,7 @@ class JsonlRetrievalDataset(Dataset):
             cap,
             padding="max_length",
             truncation=True,
-            max_length=77,
+            max_length=self.text_context_length,
             return_tensors="pt",
         )
         input_ids = tok["input_ids"][0].to(torch.int32)
@@ -231,6 +250,7 @@ class CocoCaptionsRetrievalDataset(Dataset):
         self.split = split  # 'train2017' or 'val2017'
         self.captions_json_path = os.path.join(coco_root, captions_json_rel)
         self.tokenizer = tokenizer
+        self.text_context_length = _resolve_context_length(tokenizer)
         self.max_caps_per_image = max(1, int(max_caps_per_image))
         self.is_train = is_train
         self._forced_caption_indices = None
@@ -331,7 +351,7 @@ class CocoCaptionsRetrievalDataset(Dataset):
             cap,
             padding="max_length",
             truncation=True,
-            max_length=77,
+            max_length=self.text_context_length,
             return_tensors="pt",
         )
         input_ids = tok["input_ids"][0].to(torch.int32)
