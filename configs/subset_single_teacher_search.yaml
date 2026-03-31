@@ -1,0 +1,88 @@
+data:
+  batch_size: 16
+  coco_root: dataset/coco
+  image_root: dataset
+  allowed_sources:
+    - coco
+    - flickr30k
+  max_captions_per_image: 5
+  mode: jsonl
+  num_workers: 0
+  tokenizer_type: open_clip
+  train_augment: true
+  train_captions_json: annotations/captions_train2017.json
+  train_jsonl: dataset/prepared_jsonl_subset/train.jsonl
+  train_split: train2017
+  val_captions_json: annotations/captions_val2017.json
+  val_jsonl: dataset/prepared_jsonl_subset/val.jsonl
+  val_split: val2017
+
+device: auto
+
+distill:
+  use_teacher: true
+  teachers:
+    - name: ViT-gopt-16-SigLIP2-256
+      pretrained: webli
+      input_size: 256
+  distill_margin_thr: 0.2
+  affinity_temp: 0.1
+  affinity_temp_start: 0.1
+  affinity_temp_end: 0.1
+  affinity_temp_schedule: constant
+  adaptive_teacher_weight: false
+  adaptive_teacher_tau: 0.07
+  adaptive_teacher_w_min: 0.0
+  teacher_weight_mode: static
+  source_teacher_weights: {}
+  affinity_columns: false
+  offline_feature_dir: null
+
+export:
+  onnx_path: model.onnx
+  opset: 18
+
+loss:
+  label_smoothing: 0.0
+  rank_k: 3
+  rank_margin: 0.1
+  w_contrastive: 1.0
+  w_distill_affinity: 0.8
+  w_rank: 0.0
+  w_hard_negative: 0.0
+  w_text_text: 0.0
+  hard_negative_k: 5
+
+model:
+  image_model_name: mobilenetv4_hybrid_large.e600_r384_in1k
+  image_pretrained: true
+  image_input_size: 384
+  freeze_image_backbone: false
+  text_model_name: hf-hub:DatologyAI/retr-opt-vit-b-32
+  freeze_text_backbone: false
+  embed_dim: 256
+  temperature_init: 0.07
+  logit_scale_min: -4.6
+  logit_scale_max: 4.6
+
+output:
+  out_dir: runs/subset_single_teacher_search
+
+seed: 42
+
+train:
+  amp: true
+  epochs: 3
+  eval_every_epochs: 1
+  grad_clip: 1.0
+  log_every: 20
+  lr: 5.0e-4
+  warmup_epochs: 0.5
+  weight_decay: 0.05
+  use_wandb: false
+  wandb_project: lpcvc-clip-lite
+  wandb_run_name: null
+  use_compile: false
+  use_ema: false
+  ema_decay: 0.999
+

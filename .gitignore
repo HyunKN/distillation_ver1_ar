@@ -40,13 +40,6 @@ qai_hub/
 qai_hub_client.ini
 qai_hub_client.ini.bak
 
-# Autoresearch / private research helpers
-AutoResearch기능탐구/
-program.md
-research/
-configs/subset_*.yaml
-scripts/preprocess/make_jsonl_subset.py
-
 # OS
 .DS_Store
 Thumbs.db

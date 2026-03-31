@@ -1,0 +1,12 @@
+date	run_name	status	phase	hypothesis	config	data_sources	teacher	extra_losses	main_metric	secondary_metric	decision	notes
+2026-03-22	no_teacher_smoke	PLANNED	Smoke	Teacher 없이도 train/eval/checkpoint 경로가 정상 동작한다	configs/no_teacher_smoke.yaml	coco	none	none	TBD	TBD	PENDING	가장 먼저 시스템 정상 동작 확인
+2026-03-22	single_teacher_smoke	PLANNED	Smoke	Single teacher를 붙였을 때 distill loss가 정상 계산된다	configs/single_teacher_smoke.yaml	coco	ViT-gopt-16-SigLIP2-256	none	TBD	TBD	PENDING	teacher 로딩과 distillation 경로 확인
+2026-03-22	single_teacher_baseline	PLANNED	Baseline	Single teacher baseline이 이후 모든 비교의 기준점이 된다	config.yaml	coco+flickr30k	ViT-gopt-16-SigLIP2-256	none	I2T_R@10	T2I_R@10	PENDING	반복 가능한 기준점 확보가 목표
+2026-03-22	open_images_addition	PLANNED	Data Expansion	open_images를 추가하면 baseline보다 더 좋은 retrieval 성능을 낼 수 있다	TBD	coco+flickr30k+open_images	ViT-gopt-16-SigLIP2-256	none	I2T_R@10	T2I_R@10	PENDING	baseline 이후에만 진행
+2026-03-22	open_images_filtered	PLANNED	Data Expansion	open_images를 필터링하면 raw open_images 추가보다 더 안정적인 결과를 낼 수 있다	TBD	coco+flickr30k+open_images_filtered	ViT-gopt-16-SigLIP2-256	none	I2T_R@10	T2I_R@10	PENDING	길이 또는 품질 필터링 필요
+2026-03-22	hard_negative_ablation	PLANNED	Loss Ablation	hard negative loss는 baseline보다 retrieval 성능을 개선한다	TBD	coco+flickr30k	ViT-gopt-16-SigLIP2-256	hard_negative	I2T_R@10	T2I_R@10	PENDING	baseline 안정화 후 진행
+2026-03-22	text_text_ablation	PLANNED	Loss Ablation	text-text loss는 baseline보다 retrieval 성능을 개선한다	TBD	coco+flickr30k	ViT-gopt-16-SigLIP2-256	text_text	I2T_R@10	T2I_R@10	PENDING	baseline 안정화 후 진행
+2026-03-24	subset_prepare	COMPLETED	Setup	고정 subset을 만들어 빠른 config 탐색의 공정성을 확보한다	scripts/preprocess/make_jsonl_subset.py	coco+flickr30k	none	none	TBD	TBD	KEEP	train=27663(coco12000,flickr3000,open_images12418,wit245), val=2777; config의 allowed_sources로 실제 사용 source 제한
+2026-03-24	subset_no_teacher_smoke	COMPLETED	Subset Smoke	고정 subset에서 teacher 없이도 train/eval/checkpoint 경로가 정상 동작한다	configs/subset_no_teacher_smoke.yaml	coco	none	none	Mean_R@10=1.50	I2T_R@10=1.78,T2I_R@10=1.22	KEEP	CPU로 실행됐지만 train/eval/checkpoint 성공; best.pt 저장, 다음에는 GPU 환경에서 재실행 필요
+2026-03-24	subset_single_teacher_smoke	PLANNED	Subset Smoke	고정 subset에서 single teacher distill 경로가 정상 동작한다	configs/subset_single_teacher_smoke.yaml	coco	ViT-gopt-16-SigLIP2-256	none	TBD	TBD	PENDING	subset teacher smoke
+2026-03-24	subset_single_teacher_search	PLANNED	Config Search	고정 subset에서 config-only 탐색으로 baseline 개선 방향을 빠르게 찾는다	configs/subset_single_teacher_search.yaml	coco+flickr30k	ViT-gopt-16-SigLIP2-256	none	val_mean_r10	I2T_R@10/T2I_R@10	PENDING	코드 수정 없이 override 탐색
