@@ -96,6 +96,11 @@ def main():
     print(f"Recall@1 : {i2t['R@1']*100:.2f}%")
     print(f"Recall@5 : {i2t['R@5']*100:.2f}%")
     print(f"Recall@10: {i2t['R@10']*100:.2f}%")
+    competition = metrics.get("competition", {})
+    if competition:
+        print(f"Competition I2T Text Recall@1 : {competition['I2T_text_R@1']*100:.2f}%")
+        print(f"Competition I2T Text Recall@5 : {competition['I2T_text_R@5']*100:.2f}%")
+        print(f"Competition I2T Text Recall@10: {competition['I2T_text_R@10']*100:.2f}%")
 
 
 if __name__ == "__main__":

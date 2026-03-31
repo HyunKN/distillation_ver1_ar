@@ -84,6 +84,15 @@ def format_metrics(metrics: dict) -> str:
         f"T2I: R@1={t2i['R@1']*100:.2f}% R@5={t2i['R@5']*100:.2f}% R@10={t2i['R@10']*100:.2f}%",
         f"Mean: R@1={mean['R@1']*100:.2f}% R@5={mean['R@5']*100:.2f}% R@10={mean['R@10']*100:.2f}%"
     ]
+    competition = metrics.get("competition")
+    if isinstance(competition, dict) and competition:
+        comp_parts = []
+        for key in ("I2T_text_R@1", "I2T_text_R@5", "I2T_text_R@10"):
+            if key in competition:
+                label = key.replace("I2T_text_", "")
+                comp_parts.append(f"{label}={competition[key]*100:.2f}%")
+        if comp_parts:
+            lines.append("CompI2TText: " + " ".join(comp_parts))
     return " | ".join(lines)
 
 
@@ -156,6 +165,62 @@ def coco_i2t_recall(
     for k in ks:
         results[f'R@{k}'] = (best_ranks < k).float().mean().item()
     return results
+
+
+@torch.no_grad()
+def coco_i2t_text_recall(
+    unique_image_emb: torch.Tensor,
+    text_emb: torch.Tensor,
+    unique_image_ids: List[int],
+    text_image_ids: List[int],
+    ks: List[int] = [1, 5, 10],
+    chunk_size: int = 256,
+) -> Dict[str, float]:
+    """
+    Competition-style Image-to-Text Recall.
+
+    For each image query, count how many of its ground-truth texts appear in top-K.
+    Final recall is:
+      (# ground-truth texts retrieved in top-K across all image queries)
+      / (total # ground-truth texts)
+
+    This follows the competition-side interpretation more closely than the
+    COCO-style "any matching caption hits top-K" metric.
+    """
+    N_img = unique_image_emb.size(0)
+    max_k = max(ks)
+
+    # Build mapping: image_id -> list of text indices
+    imgid_to_txt_indices = defaultdict(list)
+    for txt_idx, img_id in enumerate(text_image_ids):
+        imgid_to_txt_indices[img_id].append(txt_idx)
+
+    total_gt_texts = sum(len(indices) for indices in imgid_to_txt_indices.values())
+    retrieved_counts = {f"R@{k}": 0 for k in ks}
+
+    for start in range(0, N_img, chunk_size):
+        end = min(start + chunk_size, N_img)
+        chunk_img_emb = unique_image_emb[start:end]
+
+        sim = chunk_img_emb @ text_emb.t()
+        topk_indices = torch.topk(sim, k=min(max_k, sim.size(1)), dim=1, largest=True).indices
+
+        for i, global_idx in enumerate(range(start, end)):
+            img_id = unique_image_ids[global_idx]
+            target_txt_indices = set(imgid_to_txt_indices[img_id])
+            ranked_txt_indices = topk_indices[i].tolist()
+
+            for k in ks:
+                hits = sum(1 for txt_idx in ranked_txt_indices[:k] if txt_idx in target_txt_indices)
+                retrieved_counts[f"R@{k}"] += hits
+
+    if total_gt_texts <= 0:
+        return {f"R@{k}": 0.0 for k in ks}
+
+    return {
+        key: float(value) / float(total_gt_texts)
+        for key, value in retrieved_counts.items()
+    }
 
 
 @torch.no_grad()
@@ -247,6 +312,9 @@ def coco_bidirectional_recall(
     i2t = coco_i2t_recall(
         unique_image_emb, text_emb, unique_image_ids, text_image_ids, ks, chunk_size
     )
+    competition_i2t = coco_i2t_text_recall(
+        unique_image_emb, text_emb, unique_image_ids, text_image_ids, ks, chunk_size
+    )
     t2i = coco_t2i_recall(
         unique_image_emb, text_emb, unique_image_ids, text_image_ids, ks, chunk_size
     )
@@ -254,11 +322,13 @@ def coco_bidirectional_recall(
     results = {
         'I2T': i2t,
         'T2I': t2i,
-        'mean': {}
+        'mean': {},
+        'competition': {},
     }
     
     for k in ks:
         key = f'R@{k}'
         results['mean'][key] = (i2t[key] + t2i[key]) / 2
+        results['competition'][f'I2T_text_{key}'] = competition_i2t[key]
     
     return results

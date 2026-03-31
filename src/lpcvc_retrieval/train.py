@@ -319,7 +319,7 @@ def train(cfg) -> str:
     elif use_offline:
         print(f"[Train] Offline mode — Teacher NOT loaded. Embeddings from: {offline_dir}")
 
-    best_r10 = -1.0
+    best_primary_metric = -1.0
     best_path = os.path.join(out_dir, "best.pt")
     last_path = os.path.join(out_dir, "last.pt")
 
@@ -507,16 +507,19 @@ def train(cfg) -> str:
                 ema.apply_shadow()
             
             metrics = evaluate(model, val_loader, device, use_bidirectional=True)
-            r10 = metrics["I2T"]["R@10"]
+            primary_metric = metrics.get("competition", {}).get(
+                "I2T_text_R@10",
+                metrics["I2T"]["R@10"],
+            )
             print(f"[epoch {epoch+1}] {format_metrics(metrics)}")
 
-            if r10 > best_r10:
-                best_r10 = r10
+            if primary_metric > best_primary_metric:
+                best_primary_metric = primary_metric
                 best_ckpt = {"model": model.state_dict(), "config": cfg.as_dict(), "epoch": epoch + 1}
                 if ema is not None:
                     best_ckpt["ema"] = ema.state_dict()
                 torch.save(best_ckpt, best_path)
-                print(f"  -> New best model saved! R@10={r10*100:.2f}%")
+                print(f"  -> New best model saved! Primary R@10={primary_metric*100:.2f}%")
             
             # [NEW] EMA 복원
             if ema is not None:
