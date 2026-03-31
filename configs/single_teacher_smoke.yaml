@@ -1,15 +1,14 @@
 data:
-  batch_size: 64
+  batch_size: 16
   coco_root: dataset/coco
   image_root: dataset
   allowed_sources:
     - coco
-    - flickr30k
   max_captions_per_image: 5
   mode: jsonl
-  num_workers: 4
+  num_workers: 0
   tokenizer_type: open_clip
-  train_augment: true
+  train_augment: false
   train_captions_json: annotations/captions_train2017.json
   train_jsonl: dataset/prepared_jsonl/train.jsonl
   train_split: train2017
@@ -66,22 +65,22 @@ model:
   logit_scale_max: 4.6
 
 output:
-  out_dir: runs/single_teacher_baseline
+  out_dir: runs/single_teacher_smoke
 
 seed: 42
 
 train:
-  amp: true
-  epochs: 10
+  amp: false
+  epochs: 1
   eval_every_epochs: 1
   grad_clip: 1.0
-  log_every: 20
+  log_every: 10
   lr: 5.0e-4
-  warmup_epochs: 3.0
+  warmup_epochs: 0.0
   weight_decay: 0.05
   use_wandb: false
   wandb_project: lpcvc-clip-lite
   wandb_run_name: null
   use_compile: false
-  use_ema: true
+  use_ema: false
   ema_decay: 0.999

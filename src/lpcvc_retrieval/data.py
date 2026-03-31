@@ -74,6 +74,19 @@ def _clean_source(source: Any) -> str:
     return source if source else "unknown"
 
 
+def _normalize_allowed_sources(sources: Any) -> Optional[set[str]]:
+    if sources is None:
+        return None
+    if isinstance(sources, str):
+        sources = [sources]
+    if not isinstance(sources, (list, tuple, set)):
+        return None
+
+    normalized = {_clean_source(src) for src in sources}
+    normalized.discard("unknown")
+    return normalized or None
+
+
 def _img_transform_train(image_size: int = 224, augment: bool = True) -> transforms.Compose:
     """
     Training transform with optional augmentation.
@@ -116,7 +129,7 @@ class JsonlRetrievalDataset(Dataset):
     """
     def __init__(self, image_root: str, jsonl_path: str, tokenizer,
                  max_caps_per_image: int = 1, is_train: bool = False, augment: bool = True,
-                 image_size: int = 224):
+                 image_size: int = 224, allowed_sources: Optional[List[str]] = None):
         self.image_root = image_root
         self.jsonl_path = jsonl_path
         self.tokenizer = tokenizer
@@ -124,6 +137,7 @@ class JsonlRetrievalDataset(Dataset):
         self.max_caps_per_image = max(1, int(max_caps_per_image))
         self.is_train = is_train
         self._forced_caption_indices = None
+        self.allowed_sources = _normalize_allowed_sources(allowed_sources)
         
         # Use augmentation only for training
         self.tf = _img_transform_train(image_size=image_size, augment=augment) if is_train else _img_transform_eval(image_size=image_size)
@@ -152,6 +166,8 @@ class JsonlRetrievalDataset(Dataset):
                 image_counter += 1
 
                 source = _clean_source(obj.get("source"))
+                if self.allowed_sources is not None and source not in self.allowed_sources:
+                    continue
 
                 if self.is_train:
                     self.samples.append((img_rel, image_id, caps, source))
@@ -504,6 +520,7 @@ def make_datasets(cfg, tokenizer):
     max_caps = int(cfg.data.get("max_captions_per_image", 1))
     train_augment = bool(cfg.data.get("train_augment", True))
     image_size = int(cfg.model.get("image_input_size", 224))
+    allowed_sources = cfg.data.get("allowed_sources", None)
     
     if mode == "coco":
         coco_root = cfg.data.coco_root
@@ -537,6 +554,7 @@ def make_datasets(cfg, tokenizer):
             is_train=True,
             augment=train_augment,
             image_size=image_size,
+            allowed_sources=allowed_sources,
         )
         val_ds = JsonlRetrievalDataset(
             image_root=str(cfg.data.get("image_root", ".")),
@@ -546,6 +564,7 @@ def make_datasets(cfg, tokenizer):
             is_train=False,
             augment=False,
             image_size=image_size,
+            allowed_sources=allowed_sources,
         )
     
     distill_cfg = cfg.get("distill", {})

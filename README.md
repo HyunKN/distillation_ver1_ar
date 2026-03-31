@@ -1,6 +1,6 @@
-﻿# Dual Distillation Retrieval Optimization
+﻿# SigLIP Single-Teacher Retrieval Distillation
 
-> LPCVC 2026 Track 1 — MobileNetV4 Hybrid Large + DatologyAI retr-opt-vit-b-32 기반 이미지-텍스트 검색 경량 모델 학습 및 지식 증류
+> LPCVC 2026 Track 1 — MobileNetV4 Hybrid Large + DatologyAI retr-opt-vit-b-32 학생 모델을 SigLIP2 single teacher로 증류하는 이미지-텍스트 검색 학습 경로
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -8,12 +8,14 @@
 
 ## Overview
 
-현재 브랜치에서는 `MobileNetV4 Hybrid Large` 이미지 타워와 `hf-hub:DatologyAI/retr-opt-vit-b-32` 텍스트 타워를 결합한 dual-tower 학생 모델을 사용해 모바일 환경 이미지-텍스트 검색 모델을 학습합니다.
+현재 기본 경로는 `MobileNetV4 Hybrid Large` 이미지 타워와 `hf-hub:DatologyAI/retr-opt-vit-b-32` 텍스트 타워를 결합한 학생 모델을 `ViT-gopt-16-SigLIP2-256` single teacher로 증류해 모바일 환경 이미지-텍스트 검색 모델을 학습하는 것입니다.
 
 **핵심 사항**
 - **학생 모델**: `DualTowerStudent` — `MobileNetV4 Hybrid Large` image encoder + `DatologyAI/retr-opt-vit-b-32` text encoder
-- **Teacher 모델**: `ViT-gopt-16-SigLIP2-256` + `PE-Core-bigG-14-448`
-- **Dual Distillation**: 배치/샘플 품질 기반 adaptive teacher weighting
+- **Teacher 모델**: `ViT-gopt-16-SigLIP2-256`
+- **기본 Distillation**: single-teacher static affinity distillation
+- **실험 경로**: `config.yaml`은 baseline, `configs/no_teacher_smoke.yaml`과 `configs/single_teacher_smoke.yaml`은 smoke용
+- **비교용 legacy config**: `configs/dual_teacher_adaptive.yaml`
 - **Offline Feature 모드**: teacher VRAM 없이 반복 실험 가능
 - **배포 경로**: ONNX export → Qualcomm AI Hub compile/profile
 
@@ -36,27 +38,24 @@
 
 ```text
 ┌────────────────────────────────────────────────────────────┐
-│                        Teacher Models                      │
-│  ┌────────────────────────┐   ┌─────────────────────────┐  │
-│  │ ViT-gopt-16-SigLIP2-256│   │  PE-Core-bigG-14-448   │  │
-│  │     (text-image align) │   │ (visual robustness)    │  │
-│  └────────────┬───────────┘   └────────────┬────────────┘  │
-│               │                            │               │
-│               └──── adaptive teacher weighting ───────────┘│
-│                                │                           │
-└────────────────────────────────┼───────────────────────────┘
-                                 ▼
+│                    Single Teacher Model                    │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ ViT-gopt-16-SigLIP2-256                             │  │
+│  │ retrieval alignment teacher                         │  │
+│  └───────────────────────────────┬──────────────────────┘  │
+└──────────────────────────────────┼─────────────────────────┘
+                                   ▼
                   ┌──────────────────────────────────────────┐
                   │        Dual-Tower Student (current)      │
                   │  Image: MobileNetV4 Hybrid Large         │
                   │  Text : DatologyAI/retr-opt-vit-b-32     │
                   │  contrastive + distill losses            │
                   └──────────────────────────────────────────┘
-                                 │
-                   ┌─────────────┴─────────────┐
-                   ▼                           ▼
-            Retrieval Evaluation          ONNX Export
-           (I2T / T2I Recall@K)        + QAI Hub Compile/Profile
+                                   │
+                     ┌─────────────┴─────────────┐
+                     ▼                           ▼
+              Retrieval Evaluation          ONNX Export
+             (I2T / T2I Recall@K)        + QAI Hub Compile/Profile
 ```
 
 ### 모델 및 구조 설명
@@ -73,29 +72,32 @@
 - 텍스트 길이: `77`
 - 기본 임베딩 차원: `256`
 
-#### 2. Teacher 모델 — SigLIP 2 + PE-Core
+#### 2. Teacher 모델 — SigLIP 2 Single Teacher
 
-두 teacher 모두 `open_clip`으로 로드합니다.
+기본 teacher는 `open_clip`으로 로드하는 `ViT-gopt-16-SigLIP2-256`입니다.
 
 - `ViT-gopt-16-SigLIP2-256` — 이미지-텍스트 정렬 품질이 강한 teacher
-- `PE-Core-bigG-14-448` — 시각적 강건성이 강한 teacher
-- `distill.teachers` — 어떤 teacher를 쓸지 정의하는 목록
-- 고정 비율 실험을 할 때만 `distill.static_teacher_weights`를 추가해 teacher mixing 비율을 지정
+- `distill.teachers` — 현재 기본 config에서는 teacher 하나만 유지
+- 이전 dual teacher adaptive 실험은 `configs/dual_teacher_adaptive.yaml`에 보존
 
 #### 3. 현재 기본 Distillation 방식
 
 ```yaml
 distill:
-  adaptive_teacher_weight: true
-  teacher_weight_mode: adaptive
+  use_teacher: true
+  teachers:
+    - name: ViT-gopt-16-SigLIP2-256
+      pretrained: webli
+  adaptive_teacher_weight: false
+  teacher_weight_mode: static
+  affinity_temp_schedule: constant
   source_teacher_weights: {}
 ```
 
-- teacher 둘 다 사용
-- source prior 없이 순수 adaptive routing
-- 현재 배치/샘플에서 더 우수한 teacher에 비중을 부여
-- 그래서 기본 config에는 `static_teacher_weights`를 넣지 않음
-- 나중에 static 실험을 하려면 `teacher_weight_mode: static`, `adaptive_teacher_weight: false`로 바꾸고 필요하면 `static_teacher_weights: [0.5, 0.5]`를 추가
+- teacher 하나만 사용
+- adaptive routing과 source prior는 기본값에서 비활성화
+- temperature schedule은 constant로 고정해 baseline 해석을 단순화
+- legacy dual teacher adaptive 실험은 별도 config에서만 유지
 
 #### 4. Offline Teacher Feature 모드
 
@@ -198,12 +200,12 @@ python scripts/extract_features.py --config config.yaml --out_dir features --ove
 
 | 파일 | 설명 |
 |------|------|
-| `features/teacher_0_train.pt` | Teacher 0 학습셋 임베딩 |
-| `features/teacher_1_train.pt` | Teacher 1 학습셋 임베딩 |
-| `features/teacher_0_val.pt` | Teacher 0 검증셋 임베딩 |
-| `features/teacher_1_val.pt` | Teacher 1 검증셋 임베딩 |
+| `features/teacher_0_train.pt` | 기본 single teacher 학습셋 임베딩 |
+| `features/teacher_0_val.pt` | 기본 single teacher 검증셋 임베딩 |
 
 각 파일에 저장되는 메타: `img_embs`, `txt_embs`, `caption_indices`, `sample_count`, `dataset_fingerprint`
+
+`configs/dual_teacher_adaptive.yaml`처럼 multi-teacher config를 쓰면 `teacher_1_*` 이후 파일도 함께 생성됩니다.
 
 학습 시 `OfflineFeatureDataset`가 데이터셋 길이, 임베딩 shape, `caption_indices`, `dataset_fingerprint` 일치를 검증합니다.
 
@@ -225,13 +227,16 @@ python run_train.py --config config.yaml
 자주 쓰는 예시:
 
 ```bash
-# 빠른 테스트
-python run_train.py --config config.yaml --override train.epochs=1 --override data.batch_size=32
+# no-teacher smoke
+python run_train.py --config configs/no_teacher_smoke.yaml
 
-# teacher 없이 학습
-python run_train.py --config config.yaml --override distill.use_teacher=false
+# single-teacher smoke
+python run_train.py --config configs/single_teacher_smoke.yaml
 
-# offline feature 모드
+# local data overrides
+python run_train.py --config config.yaml --override data.image_root=D:/LPCVC_Data --override data.train_jsonl=D:/LPCVC_Data/prepared_jsonl/train.jsonl --override data.val_jsonl=D:/LPCVC_Data/prepared_jsonl/val.jsonl
+
+# offline feature mode
 python run_train.py --config config.yaml --override distill.offline_feature_dir=features
 ```
 
@@ -243,7 +248,7 @@ python run_train.py --config config.yaml --override distill.offline_feature_dir=
 | Scheduler | warmup + cosine decay |
 | AMP | CUDA에서 기본 활성 |
 | EMA | 기본 활성 |
-| `torch.compile` | 기본 활성 |
+| `torch.compile` | 기본 비활성 |
 | Best checkpoint 기준 | I2T R@10 |
 
 ### 4. Evaluation
@@ -251,13 +256,13 @@ python run_train.py --config config.yaml --override distill.offline_feature_dir=
 Windows:
 
 ```bash
-set PYTHONPATH=src && python scripts\eval.py --config config.yaml --ckpt runs\lpcvc_clip_lite\best.pt
+set PYTHONPATH=src && python scripts\eval.py --config config.yaml --ckpt runs\single_teacher_baseline\best.pt
 ```
 
 Linux/macOS:
 
 ```bash
-PYTHONPATH=src python scripts/eval.py --config config.yaml --ckpt runs/lpcvc_clip_lite/best.pt
+PYTHONPATH=src python scripts/eval.py --config config.yaml --ckpt runs/single_teacher_baseline/best.pt
 ```
 
 - `image_id`가 있으면 COCO-style 양방향 평가
@@ -268,13 +273,13 @@ PYTHONPATH=src python scripts/eval.py --config config.yaml --ckpt runs/lpcvc_cli
 Windows:
 
 ```bash
-set PYTHONPATH=src && python scripts\export_onnx_split.py --config config.yaml --ckpt runs\lpcvc_clip_lite\best.pt --out_dir exported_onnx
+set PYTHONPATH=src && python scripts\export_onnx_split.py --config config.yaml --ckpt runs\single_teacher_baseline\best.pt --out_dir exported_onnx
 ```
 
 Linux/macOS:
 
 ```bash
-PYTHONPATH=src python scripts/export_onnx_split.py --config config.yaml --ckpt runs/lpcvc_clip_lite/best.pt --out_dir exported_onnx
+PYTHONPATH=src python scripts/export_onnx_split.py --config config.yaml --ckpt runs/single_teacher_baseline/best.pt --out_dir exported_onnx
 ```
 
 출력: `exported_onnx/image_encoder.onnx`, `exported_onnx/text_encoder.onnx`
@@ -382,7 +387,8 @@ python compile_and_profile.py \
 | 설정 | 기본값 | 설명 |
 |------|--------|------|
 | `data.mode` | `jsonl` | `jsonl`이면 JSONL 데이터셋, `coco`면 COCO captions JSON 로더를 사용 |
-| `data.batch_size` | `128` | train/eval/extract에 공통으로 쓰이는 기본 배치 크기 |
+| `data.batch_size` | `64` | train/eval/extract에 공통으로 쓰이는 기본 배치 크기 |
+| `data.allowed_sources` | `[coco, flickr30k]` | JSONL 모드에서 기본 baseline에 사용할 source 목록 |
 | `data.max_captions_per_image` | `5` | 학습 시 한 이미지에서 캡션 후보를 몇 개까지 샘플링할지 결정 |
 | `data.train_augment` | `true` | `true`면 train transform에 랜덤 crop/flip/color jitter 적용 |
 | `data.tokenizer_type` | `open_clip` | 현재 student text tower와 맞는 OpenCLIP tokenizer 경로 사용 |
@@ -393,16 +399,16 @@ python compile_and_profile.py \
 | `model.image_input_size` | `384` | student 이미지 입력 리사이즈 크기 및 export 입력 크기 |
 | `model.embed_dim` | `256` | 최종 검색 임베딩 차원 |
 | `distill.use_teacher` | `true` | `true`면 teacher distillation loss를 함께 학습 |
-| `distill.teacher_weight_mode` | `adaptive` | teacher mixing 방식을 `static`/`adaptive`/`adaptive_source` 중 선택 |
+| `distill.teacher_weight_mode` | `static` | 기본 single-teacher baseline에서는 고정 teacher 경로 사용 |
 | `distill.offline_feature_dir` | `null` | 경로가 있으면 online teacher 대신 pre-extracted teacher feature 사용 |
 | `loss.w_contrastive` | `1.0` | 기본 SigLIP retrieval loss 비중 |
 | `loss.w_distill_affinity` | `0.8` | teacher affinity distillation 비중 |
 | `train.epochs` | `10` | 총 학습 epoch 수 |
 | `train.lr` | `5e-4` | AdamW 기본 learning rate |
 | `train.amp` | `true` | CUDA에서 mixed precision 학습 사용 |
-| `train.use_compile` | `true` | 가능하면 `torch.compile`로 모델을 컴파일 |
+| `train.use_compile` | `false` | smoke/baseline 해석을 단순화하기 위해 기본 비활성 |
 | `train.use_ema` | `true` | EMA shadow weights를 유지하고 평가 시 사용 |
-| `output.out_dir` | `runs/lpcvc_clip_lite` | 체크포인트와 학습 산출물 저장 경로 |
+| `output.out_dir` | `runs/single_teacher_baseline` | 체크포인트와 학습 산출물 저장 경로 |
 
 ---
 
@@ -414,7 +420,7 @@ python compile_and_profile.py \
 | Best checkpoint 선정 | I2T R@10 |
 | 학생 입력 해상도 | 384 x 384 |
 | 텍스트 길이 | 77 |
-| Teacher 입력 크기 | SigLIP2 256 / PE-Core 448 |
+| Teacher 입력 크기 | SigLIP2 256 |
 | Distillation 방식 | contrastive + affinity distill |
 | 배포 산출물 | `image_encoder.onnx`, `text_encoder.onnx` |
 | 디바이스 검증 | Qualcomm AI Hub compile/profile |
@@ -444,7 +450,7 @@ python compile_and_profile.py \
 주요 내용:
 - 데이터 파이프라인과 JSONL 계약
 - Dual-tower 학생 모델 구조 (`MobileNetV4 Hybrid Large` + `DatologyAI/retr-opt-vit-b-32`)
-- Teacher 로딩과 adaptive distillation 로직
+- Teacher 로딩과 single-teacher distillation 로직
 - Offline teacher feature 검증 방식
 - 학습 / 평가 / export / QAI Hub 흐름
 

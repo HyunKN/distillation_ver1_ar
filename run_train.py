@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-Dual Distillation Retrieval Optimization Training Script
-=======================================================
-CMD에서 쉽게 현재 dual-tower 학생 모델 학습을 실행하는 엔트리포인트입니다.
+Retrieval Distillation Training Script
+=====================================
+CMD에서 쉽게 현재 retrieval 학생 모델 학습을 실행하는 엔트리포인트입니다.
 
 Usage:
     python run_train.py --config config.yaml
@@ -23,7 +23,7 @@ from lpcvc_retrieval.train import train
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train the current dual-tower retrieval model",
+        description="Train the current retrieval model",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
@@ -63,7 +63,7 @@ def main():
         device_info = "CPU"
     
     print("=" * 60)
-    print("  Dual Distillation Retrieval Optimization Training")
+    print("  Retrieval Distillation Training")
     print("=" * 60)
     print(f"  Device: {device_info}")
     print(f"  Image Tower: {cfg.model.image_model_name}")

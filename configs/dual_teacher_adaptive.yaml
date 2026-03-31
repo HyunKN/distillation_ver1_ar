@@ -1,10 +1,7 @@
 data:
-  batch_size: 64
+  batch_size: 128
   coco_root: dataset/coco
   image_root: dataset
-  allowed_sources:
-    - coco
-    - flickr30k
   max_captions_per_image: 5
   mode: jsonl
   num_workers: 4
@@ -17,7 +14,7 @@ data:
   val_jsonl: dataset/prepared_jsonl/val.jsonl
   val_split: val2017
 
-device: auto
+device: cuda
 
 distill:
   use_teacher: true
@@ -25,15 +22,18 @@ distill:
     - name: ViT-gopt-16-SigLIP2-256
       pretrained: webli
       input_size: 256
+    - name: PE-Core-bigG-14-448
+      pretrained: meta
+      input_size: 448
   distill_margin_thr: 0.2
   affinity_temp: 0.1
-  affinity_temp_start: 0.1
-  affinity_temp_end: 0.1
-  affinity_temp_schedule: constant
-  adaptive_teacher_weight: false
+  affinity_temp_start: 0.12
+  affinity_temp_end: 0.07
+  affinity_temp_schedule: cosine
+  adaptive_teacher_weight: true
   adaptive_teacher_tau: 0.07
-  adaptive_teacher_w_min: 0.0
-  teacher_weight_mode: static
+  adaptive_teacher_w_min: 0.20
+  teacher_weight_mode: adaptive
   source_teacher_weights: {}
   affinity_columns: false
   offline_feature_dir: null
@@ -48,9 +48,9 @@ loss:
   rank_margin: 0.1
   w_contrastive: 1.0
   w_distill_affinity: 0.8
-  w_rank: 0.0
-  w_hard_negative: 0.0
-  w_text_text: 0.0
+  w_rank: 0.1
+  w_hard_negative: 0.1
+  w_text_text: 0.05
   hard_negative_k: 5
 
 model:
@@ -66,7 +66,7 @@ model:
   logit_scale_max: 4.6
 
 output:
-  out_dir: runs/single_teacher_baseline
+  out_dir: runs/lpcvc_clip_lite
 
 seed: 42
 
@@ -82,6 +82,6 @@ train:
   use_wandb: false
   wandb_project: lpcvc-clip-lite
   wandb_run_name: null
-  use_compile: false
+  use_compile: true
   use_ema: true
   ema_decay: 0.999

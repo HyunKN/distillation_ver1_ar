@@ -147,6 +147,17 @@ def _scheduled_distill_temp(
 
     return float(start + (end - start) * alpha)
 
+
+def _flatten_metric_logs(metrics: dict, prefix: str) -> dict:
+    """Flatten nested retrieval metrics for experiment logging."""
+    flat = {}
+    for group_name, group_metrics in metrics.items():
+        if not isinstance(group_metrics, dict):
+            continue
+        for metric_name, metric_value in group_metrics.items():
+            flat[f"{prefix}/{group_name}_{metric_name}"] = float(metric_value)
+    return flat
+
 def train(cfg) -> str:
     device = resolve_device(cfg.get("device", "auto"))
     set_seed(int(cfg.get("seed", 42)))
@@ -457,18 +468,27 @@ def train(cfg) -> str:
                 ema.update()
 
             if step % log_every == 0:
+                distill_active = teacher is not None or use_offline
                 current_lr = scheduler.get_last_lr()[0]
                 postfix = {
                     "loss": f"{loss.item():.4f}",
                     "scale": f"{model.logit_scale.exp().item():.2f}",
                     "lr": f"{current_lr:.2e}",
                 }
-                if teacher is not None or use_offline:
+                if distill_active:
                     postfix["distill"] = f"{distill_loss_val.item():.4f}"
                     postfix["dtemp"] = f"{current_affinity_temp:.3f}"
                 pbar.set_postfix(postfix)
                 # [OPTIONAL] WandB step logging
-                logger.log({"train/loss": loss.item(), "train/lr": current_lr})
+                step_metrics = {
+                    "train/loss": float(loss.item()),
+                    "train/distill_loss": float(distill_loss_val.item()),
+                    "train/lr": float(current_lr),
+                    "train/logit_scale": float(model.logit_scale.exp().item()),
+                }
+                if distill_active:
+                    step_metrics["train/distill_temp"] = float(current_affinity_temp)
+                logger.log(step_metrics)
 
         # save checkpoints
         ckpt = {"model": model.state_dict(), "config": cfg.as_dict(), "epoch": epoch + 1}
@@ -503,7 +523,7 @@ def train(cfg) -> str:
                 ema.restore()
             
             # [OPTIONAL] WandB epoch logging
-            logger.log_epoch(epoch + 1, {"val/I2T_R@10": r10, "val/T2I_R@10": metrics["T2I"]["R@10"]})
+            logger.log_epoch(epoch + 1, _flatten_metric_logs(metrics, prefix="val"))
 
     # [OPTIONAL] WandB finish
     logger.finish()
